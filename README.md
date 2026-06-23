@@ -4,7 +4,7 @@ A full-stack laptop e-commerce platform built with **Spring Boot 3.5**, **Spring
 
 ## 📌 Related Repository
 
-**Frontend Application:** [Ecom-Frontend-thesis-project-2025.1](https://github.com/MrBuddhaCoder/Ecom-Frontend-thesis-project-2025.1)
+**Frontend Application:** [Ecom-Frontend-thesis-project-2025.1](https://github.com/thaivanlam/Ecom-Frontend-thesis-project-2025.1)
 
 ---
 
