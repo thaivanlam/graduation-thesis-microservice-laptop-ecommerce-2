@@ -11,9 +11,5 @@ spring:
           starttls:
             enable: true
 
-eureka:
-  client:
-    serviceUrl:
-      defaultZone: http://discovery-service:8761/eureka/
-    register-with-eureka: true
-    fetch-registry: true
+server:
+  port: 8084

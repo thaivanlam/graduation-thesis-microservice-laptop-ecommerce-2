@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: jdbc:mysql://mysql:3306/ecommerce_order?createDatabaseIfNotExist=true
+    username: root
+    password: root
+  rabbitmq:
+    host: rabbitmq
+
+frontend:
+  url: ${FRONTEND_URL:http://localhost:5173}
+
+product:
+  service:
+    base-url: http://product-service:8081/api
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://discovery-service:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true

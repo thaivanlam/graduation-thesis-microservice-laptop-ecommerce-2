@@ -1,20 +1,13 @@
 spring:
   application:
     name: user-service
-#  config:
-#    import: optional:configserver:http://localhost:8888
-  rabbitmq:
-#    --for local testing, these values can be overridden by the config server
-#    host: localhost
-#    port: 5672
-#    username: guest
-#    password: guest
-    host: rabbitmq
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  config:
+    import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
 
 queue:
   notification:
     queue: notification-queue
     exchange: notification-exchange
     routing-key: notification-routing-key
-
-

@@ -1,10 +1,4 @@
 spring:
-  datasource:
-#    url: jdbc:mysql://localhost:3306/laptop_ecommerce_graduation_project_order_service?serverTimezone=UTC
-#    username: root
-#    password: thailam123
-    url: jdbc:mysql://mysql:3306/ecommerce
-
   jpa:
     hibernate:
       ddl-auto: update
@@ -19,18 +13,6 @@ spring:
 server:
   port: 8083
 
-frontend:
-  url: http://localhost:5173
-#  url: https://pictures-rebate-mine-made.trycloudflare.com  # Frontend tunnel URL
-eureka:
-  client:
-    serviceUrl:
-#      defaultZone: http://localhost:8761/eureka
-      defaultZone: http://discovery-service:8761/eureka/
-    register-with-eureka: true
-    fetch-registry: true
-
-#STRIPE KEY
 stripe:
   secret:
     key: ${STRIPE_SECRET_KEY}

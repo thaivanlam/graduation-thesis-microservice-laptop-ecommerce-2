@@ -1,22 +1,14 @@
 spring:
-  rabbitmq:
-#   --for local testing, these values can be overridden by the config server
-#    host: localhost
-#    port: 5672
-#    username: guest
-#    password: guest
-#    virtual-host: "/"
-    host: rabbitmq
   application:
     name: notification-service
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   config:
     #    Imports configuration data from a config server when available
-#    import: "optional:configserver:"
-    import: "optional:configserver:${CONFIG_SERVER_URL:http://config-server:8888}"
+    import: "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"
   cloud:
     config:
-#      uri: ${CONFIG_SERVER_URL:http://localhost:8888}
-      uri: ${CONFIG_SERVER_URL:http://config-server:8888}
+      uri: ${CONFIG_SERVER_URL:http://localhost:8888}
       #      1
       request-connect-timeout: 5000
       #      2
@@ -32,8 +24,6 @@ spring:
         max-interval: 2000
         #        7
         multiplier: 1.1
-#      username: admin
-#      password: 123456
         #1 Timeout on waiting to connect to the config server (ms)
         #2 Timeout on waiting to read configuration data from the config server (ms)
         #3 Makes a failure to connect to the config server fatal
@@ -41,7 +31,6 @@ spring:
         #5 Initial retry interval for backoff (ms)
         #6 Maximum retry interval for backoff (ms)
       #7 Multiplier to compute the next interval
-
 
 server:
   port: 8084
