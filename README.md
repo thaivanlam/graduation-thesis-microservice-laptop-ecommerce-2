@@ -1,5 +1,7 @@
 # Laptop E-Commerce Platform — Microservices Architecture
 
+test
+
 A full-stack laptop e-commerce platform built with **Spring Boot 3.5**, **Spring Cloud 2025**, and **React**, following a microservices architecture pattern. The system supports multi-role users (Customer, Seller, Admin), product catalog with technical specifications, shopping cart, Stripe-powered checkout, and asynchronous email notifications.
 
 ## 📌 Related Repository
@@ -45,15 +47,15 @@ API Gateway (:8080)  ──── JWT cookie validation
 
 ## Services Overview
 
-| Service | Port | Responsibility | Database |
-|---|---|---|---|
-| **API Gateway** | 8080 | Routing, JWT validation, CORS, role-based filtering | — |
-| **Config Server** | 8888 | Centralized configuration (native profile, classpath) | — |
-| **Discovery Service** | 8761 | Eureka service registry | — |
-| **User Service** | 8082 | Registration, login (BCrypt), JWT generation, addresses, user CRUD | MySQL `ecommerce` |
-| **Product Service** | 8081 | Categories, products, specifications, image upload, brand/filter queries | MySQL `ecommerce_product` |
-| **Order Service** | 8083 | Cart (CRUD), order placement, Stripe payments, order status, analytics | MySQL `ecommerce_order` |
-| **Notification Service** | 8084 | Consumes RabbitMQ messages, sends transactional emails via SMTP | — |
+| Service                  | Port | Responsibility                                                           | Database                  |
+| ------------------------ | ---- | ------------------------------------------------------------------------ | ------------------------- |
+| **API Gateway**          | 8080 | Routing, JWT validation, CORS, role-based filtering                      | —                         |
+| **Config Server**        | 8888 | Centralized configuration (native profile, classpath)                    | —                         |
+| **Discovery Service**    | 8761 | Eureka service registry                                                  | —                         |
+| **User Service**         | 8082 | Registration, login (BCrypt), JWT generation, addresses, user CRUD       | MySQL `ecommerce`         |
+| **Product Service**      | 8081 | Categories, products, specifications, image upload, brand/filter queries | MySQL `ecommerce_product` |
+| **Order Service**        | 8083 | Cart (CRUD), order placement, Stripe payments, order status, analytics   | MySQL `ecommerce_order`   |
+| **Notification Service** | 8084 | Consumes RabbitMQ messages, sends transactional emails via SMTP          | —                         |
 
 ---
 
@@ -73,7 +75,7 @@ Eureka is the simplest option when deploying with Docker Compose on a single hos
 
 ### Why a shared JWT secret across all services?
 
-All services (gateway, user-service, product-service, order-service) share the same HMAC-SHA secret key (`spring.app.jwtSecret`). This avoids the complexity of an OAuth2 authorization server or asymmetric key distribution. The user-service *creates* tokens; the gateway and downstream services *validate* them independently.
+All services (gateway, user-service, product-service, order-service) share the same HMAC-SHA secret key (`spring.app.jwtSecret`). This avoids the complexity of an OAuth2 authorization server or asymmetric key distribution. The user-service _creates_ tokens; the gateway and downstream services _validate_ them independently.
 
 **Trade-off:** A symmetric secret means every service that can validate tokens can also forge them. If any service is compromised, the entire auth system is compromised. A more secure approach would use RS256 (asymmetric) where only the user-service holds the private key and other services verify with the public key. Additionally, token revocation isn't supported — a logged-out user's token remains valid until expiry.
 
@@ -99,7 +101,7 @@ The config server uses `spring.profiles.active=native` with configurations store
 
 The `OrderItem` and `CartItem` entities embed a `ProductSnapshot` (product name, price, image, etc.) rather than holding a foreign key to the Product table in another database.
 
-**Trade-off:** This is a deliberate denormalization required by the microservices boundary — Order Service and Product Service use different databases. A foreign key across databases isn't possible. The snapshot captures the product state *at the time of order*, which is semantically correct (the price at checkout shouldn't change if the seller later updates it). The cost is storage duplication and no cascading updates.
+**Trade-off:** This is a deliberate denormalization required by the microservices boundary — Order Service and Product Service use different databases. A foreign key across databases isn't possible. The snapshot captures the product state _at the time of order_, which is semantically correct (the price at checkout shouldn't change if the seller later updates it). The cost is storage duplication and no cascading updates.
 
 ### Why a single MySQL instance with multiple databases?
 
@@ -141,11 +143,13 @@ The order-service calls product-service via `RestTemplate` (synchronous HTTP). T
 ```
 
 **Role hierarchy:**
+
 - `ROLE_USER` — browse, cart, place orders, manage addresses
 - `ROLE_SELLER` — add/edit own products, view own orders
 - `ROLE_ADMIN` — full access: manage all products, orders, users, analytics
 
 Gateway enforces role checks via path pattern matching defined in `application.yaml`:
+
 - `/product-manager/api/admin/**` → requires `ROLE_ADMIN`
 - `/order-manager/api/seller/**` → requires `ROLE_ADMIN` or `ROLE_SELLER`
 - `/user-manager/api/auth/**`, `/product-manager/api/public/**` → public (no auth)
@@ -170,106 +174,106 @@ The paths below show the **external gateway path**. To call a service directly (
 
 #### Authentication — `AuthController`
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| POST | `/user-manager/api/auth/signin` | Public | Log in; returns user info and sets the `springBootEcom` JWT cookie |
-| POST | `/user-manager/api/auth/signup` | Public | Register a new user |
-| GET | `/user-manager/api/auth/username` | Public* | Current logged-in username (read from JWT cookie) |
-| GET | `/user-manager/api/auth/user` | Public* | Current user details |
-| POST | `/user-manager/api/auth/signout` | Public* | Log out; clears the JWT cookie |
-| GET | `/user-manager/api/auth/sellers` | Public* | Paginated list of sellers (`pageNumber`) |
-| GET | `/user-manager/api/auth/customers` | Public* | Paginated list of customers (`pageNumber`) |
-| DELETE | `/user-manager/api/auth/customers/{userId}` | Public* | Delete a customer |
-| DELETE | `/user-manager/api/auth/sellers/{userId}` | Public* | Delete a seller |
+| Method | Path                                        | Access   | Description                                                        |
+| ------ | ------------------------------------------- | -------- | ------------------------------------------------------------------ |
+| POST   | `/user-manager/api/auth/signin`             | Public   | Log in; returns user info and sets the `springBootEcom` JWT cookie |
+| POST   | `/user-manager/api/auth/signup`             | Public   | Register a new user                                                |
+| GET    | `/user-manager/api/auth/username`           | Public\* | Current logged-in username (read from JWT cookie)                  |
+| GET    | `/user-manager/api/auth/user`               | Public\* | Current user details                                               |
+| POST   | `/user-manager/api/auth/signout`            | Public\* | Log out; clears the JWT cookie                                     |
+| GET    | `/user-manager/api/auth/sellers`            | Public\* | Paginated list of sellers (`pageNumber`)                           |
+| GET    | `/user-manager/api/auth/customers`          | Public\* | Paginated list of customers (`pageNumber`)                         |
+| DELETE | `/user-manager/api/auth/customers/{userId}` | Public\* | Delete a customer                                                  |
+| DELETE | `/user-manager/api/auth/sellers/{userId}`   | Public\* | Delete a seller                                                    |
 
 \* The gateway marks all `/user-manager/api/auth/**` as public, so these are not role-checked at the gateway despite being admin-style operations.
 
 #### Addresses — `AddressController`
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| POST | `/user-manager/api/addresses` | USER | Create an address |
-| GET | `/user-manager/api/addresses` | USER | List all addresses |
-| GET | `/user-manager/api/addresses/{addressId}` | USER | Get an address by ID |
-| GET | `/user-manager/api/users/addresses` | USER | Addresses of the logged-in user |
-| PUT | `/user-manager/api/addresses/{addressId}` | USER | Update an address |
-| DELETE | `/user-manager/api/addresses/{addressId}` | USER | Delete an address |
+| Method | Path                                      | Access | Description                     |
+| ------ | ----------------------------------------- | ------ | ------------------------------- |
+| POST   | `/user-manager/api/addresses`             | USER   | Create an address               |
+| GET    | `/user-manager/api/addresses`             | USER   | List all addresses              |
+| GET    | `/user-manager/api/addresses/{addressId}` | USER   | Get an address by ID            |
+| GET    | `/user-manager/api/users/addresses`       | USER   | Addresses of the logged-in user |
+| PUT    | `/user-manager/api/addresses/{addressId}` | USER   | Update an address               |
+| DELETE | `/user-manager/api/addresses/{addressId}` | USER   | Delete an address               |
 
 ### Product Service (`/product-manager`)
 
 #### Products — `ProductController`
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| GET | `/product-manager/api/public/products` | Public | List/search products with filters (`keyword`, `category`, `minPrice`, `maxPrice`, `brands`, `processors`, `ram`, `storage`, pagination + sorting) |
-| GET | `/product-manager/api/public/products/brands` | Public | List all distinct brands |
-| GET | `/product-manager/api/public/categories/{categoryId}/products` | Public | Products in a category (paginated) |
-| GET | `/product-manager/api/public/products/keyword/{keyword}` | Public | Search products by keyword |
-| POST | `/product-manager/api/admin/categories/{categoryId}/product` | ADMIN | Add a product to a category |
-| POST | `/product-manager/api/seller/categories/{categoryId}/product` | SELLER | Add a product to a category (seller) |
-| PUT | `/product-manager/api/admin/products/{productId}` | ADMIN | Update a product |
-| PUT | `/product-manager/api/seller/products/{productId}` | SELLER | Update a product (seller) |
-| DELETE | `/product-manager/api/admin/products/{productId}` | ADMIN | Delete a product |
-| DELETE | `/product-manager/api/seller/products/{productId}` | SELLER | Delete a product (seller) |
-| PUT | `/product-manager/api/admin/products/{productId}/image` | ADMIN | Upload/replace product image (`image` multipart) |
-| PUT | `/product-manager/api/seller/products/{productId}/image` | SELLER | Upload/replace product image (seller) |
-| GET | `/product-manager/api/admin/products` | ADMIN | List all products (admin view, paginated) |
-| GET | `/product-manager/api/seller/products` | SELLER | List products (seller view, paginated) |
-| GET | `/product-manager/api/admin/app/analytics` | ADMIN | Product analytics data |
-| GET | `/product-manager/api/internal/products/{productId}` | Internal | Get product (used by Order Service for stock validation) |
-| POST | `/product-manager/api/internal/products/{productId}/reduce-stock` | Internal | Decrement product stock (body: `quantity`) |
+| Method | Path                                                              | Access   | Description                                                                                                                                       |
+| ------ | ----------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/product-manager/api/public/products`                            | Public   | List/search products with filters (`keyword`, `category`, `minPrice`, `maxPrice`, `brands`, `processors`, `ram`, `storage`, pagination + sorting) |
+| GET    | `/product-manager/api/public/products/brands`                     | Public   | List all distinct brands                                                                                                                          |
+| GET    | `/product-manager/api/public/categories/{categoryId}/products`    | Public   | Products in a category (paginated)                                                                                                                |
+| GET    | `/product-manager/api/public/products/keyword/{keyword}`          | Public   | Search products by keyword                                                                                                                        |
+| POST   | `/product-manager/api/admin/categories/{categoryId}/product`      | ADMIN    | Add a product to a category                                                                                                                       |
+| POST   | `/product-manager/api/seller/categories/{categoryId}/product`     | SELLER   | Add a product to a category (seller)                                                                                                              |
+| PUT    | `/product-manager/api/admin/products/{productId}`                 | ADMIN    | Update a product                                                                                                                                  |
+| PUT    | `/product-manager/api/seller/products/{productId}`                | SELLER   | Update a product (seller)                                                                                                                         |
+| DELETE | `/product-manager/api/admin/products/{productId}`                 | ADMIN    | Delete a product                                                                                                                                  |
+| DELETE | `/product-manager/api/seller/products/{productId}`                | SELLER   | Delete a product (seller)                                                                                                                         |
+| PUT    | `/product-manager/api/admin/products/{productId}/image`           | ADMIN    | Upload/replace product image (`image` multipart)                                                                                                  |
+| PUT    | `/product-manager/api/seller/products/{productId}/image`          | SELLER   | Upload/replace product image (seller)                                                                                                             |
+| GET    | `/product-manager/api/admin/products`                             | ADMIN    | List all products (admin view, paginated)                                                                                                         |
+| GET    | `/product-manager/api/seller/products`                            | SELLER   | List products (seller view, paginated)                                                                                                            |
+| GET    | `/product-manager/api/admin/app/analytics`                        | ADMIN    | Product analytics data                                                                                                                            |
+| GET    | `/product-manager/api/internal/products/{productId}`              | Internal | Get product (used by Order Service for stock validation)                                                                                          |
+| POST   | `/product-manager/api/internal/products/{productId}/reduce-stock` | Internal | Decrement product stock (body: `quantity`)                                                                                                        |
 
 #### Categories — `CategoryController`
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| GET | `/product-manager/api/public/categories` | Public | List categories (paginated) |
-| POST | `/product-manager/api/admin/categories` | ADMIN | Create a category |
-| PUT | `/product-manager/api/admin/categories/{categoryId}` | ADMIN | Update a category |
-| DELETE | `/product-manager/api/admin/categories/{categoryId}` | ADMIN | Delete a category |
+| Method | Path                                                 | Access | Description                 |
+| ------ | ---------------------------------------------------- | ------ | --------------------------- |
+| GET    | `/product-manager/api/public/categories`             | Public | List categories (paginated) |
+| POST   | `/product-manager/api/admin/categories`              | ADMIN  | Create a category           |
+| PUT    | `/product-manager/api/admin/categories/{categoryId}` | ADMIN  | Update a category           |
+| DELETE | `/product-manager/api/admin/categories/{categoryId}` | ADMIN  | Delete a category           |
 
 #### Specifications — `ProductSpecificationController`
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| GET | `/product-manager/api/products/public/{productId}/specifications` | Public | Get a product's technical specifications |
-| POST | `/product-manager/api/products/admin/{productId}/specifications` | ADMIN | Create/update specifications |
-| POST | `/product-manager/api/products/seller/{productId}/specifications` | SELLER | Create/update specifications (seller) |
-| DELETE | `/product-manager/api/products/admin/{productId}/specifications` | ADMIN | Delete specifications |
-| DELETE | `/product-manager/api/products/seller/{productId}/specifications` | SELLER | Delete specifications (seller) |
+| Method | Path                                                              | Access | Description                              |
+| ------ | ----------------------------------------------------------------- | ------ | ---------------------------------------- |
+| GET    | `/product-manager/api/products/public/{productId}/specifications` | Public | Get a product's technical specifications |
+| POST   | `/product-manager/api/products/admin/{productId}/specifications`  | ADMIN  | Create/update specifications             |
+| POST   | `/product-manager/api/products/seller/{productId}/specifications` | SELLER | Create/update specifications (seller)    |
+| DELETE | `/product-manager/api/products/admin/{productId}/specifications`  | ADMIN  | Delete specifications                    |
+| DELETE | `/product-manager/api/products/seller/{productId}/specifications` | SELLER | Delete specifications (seller)           |
 
 ### Order Service (`/order-manager`)
 
 #### Cart — `CartController`
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| POST | `/order-manager/api/cart/create` | USER | Create/update cart from a list of items |
-| POST | `/order-manager/api/carts/products/{productId}/quantity/{quantity}` | USER | Add a product to the cart |
-| GET | `/order-manager/api/carts` | USER | List all carts |
-| GET | `/order-manager/api/carts/users/cart` | USER | Get the logged-in user's cart |
-| PUT | `/order-manager/api/cart/products/{productId}/quantity/{operation}` | USER | Increment/decrement cart item (`operation` = anything vs `delete`) |
-| DELETE | `/order-manager/api/carts/{cartId}/product/{productId}` | USER | Remove a product from the cart |
+| Method | Path                                                                | Access | Description                                                        |
+| ------ | ------------------------------------------------------------------- | ------ | ------------------------------------------------------------------ |
+| POST   | `/order-manager/api/cart/create`                                    | USER   | Create/update cart from a list of items                            |
+| POST   | `/order-manager/api/carts/products/{productId}/quantity/{quantity}` | USER   | Add a product to the cart                                          |
+| GET    | `/order-manager/api/carts`                                          | USER   | List all carts                                                     |
+| GET    | `/order-manager/api/carts/users/cart`                               | USER   | Get the logged-in user's cart                                      |
+| PUT    | `/order-manager/api/cart/products/{productId}/quantity/{operation}` | USER   | Increment/decrement cart item (`operation` = anything vs `delete`) |
+| DELETE | `/order-manager/api/carts/{cartId}/product/{productId}`             | USER   | Remove a product from the cart                                     |
 
 #### Orders & Payments — `OrderController`
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| POST | `/order-manager/api/order/users/payments/{paymentMethod}` | USER | Place an order with the given payment method |
-| POST | `/order-manager/api/order/stripe-client-secret` | USER | Create a Stripe PaymentIntent and return its `clientSecret` |
-| GET | `/order-manager/api/order/users/orders` | USER | Logged-in user's orders (paginated) |
-| PUT | `/order-manager/api/order/users/orders/{orderId}/status` | USER | Update order status (customer, e.g. cancel) |
-| GET | `/order-manager/api/admin/orders` | ADMIN | All orders (paginated) |
-| GET | `/order-manager/api/admin/app/analytics` | ADMIN | Order analytics data |
-| PUT | `/order-manager/api/admin/orders/{orderId}/status` | ADMIN | Update order status |
-| GET | `/order-manager/api/seller/orders` | SELLER | Seller's orders (paginated) |
-| PUT | `/order-manager/api/seller/orders/{orderId}/status` | SELLER | Update order status (seller) |
+| Method | Path                                                      | Access | Description                                                 |
+| ------ | --------------------------------------------------------- | ------ | ----------------------------------------------------------- |
+| POST   | `/order-manager/api/order/users/payments/{paymentMethod}` | USER   | Place an order with the given payment method                |
+| POST   | `/order-manager/api/order/stripe-client-secret`           | USER   | Create a Stripe PaymentIntent and return its `clientSecret` |
+| GET    | `/order-manager/api/order/users/orders`                   | USER   | Logged-in user's orders (paginated)                         |
+| PUT    | `/order-manager/api/order/users/orders/{orderId}/status`  | USER   | Update order status (customer, e.g. cancel)                 |
+| GET    | `/order-manager/api/admin/orders`                         | ADMIN  | All orders (paginated)                                      |
+| GET    | `/order-manager/api/admin/app/analytics`                  | ADMIN  | Order analytics data                                        |
+| PUT    | `/order-manager/api/admin/orders/{orderId}/status`        | ADMIN  | Update order status                                         |
+| GET    | `/order-manager/api/seller/orders`                        | SELLER | Seller's orders (paginated)                                 |
+| PUT    | `/order-manager/api/seller/orders/{orderId}/status`       | SELLER | Update order status (seller)                                |
 
 ### Notification Service (`:8084`, not exposed via gateway)
 
-| Method | Path | Access | Description |
-|---|---|---|---|
-| POST | `/api/v1/notifications/sendMail` | Internal | Send a transactional email (`NotificationController`). Also a RabbitMQ `@RabbitListener` — normally triggered asynchronously by order confirmation messages, not called directly by the frontend. |
+| Method | Path                             | Access   | Description                                                                                                                                                                                       |
+| ------ | -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/notifications/sendMail` | Internal | Send a transactional email (`NotificationController`). Also a RabbitMQ `@RabbitListener` — normally triggered asynchronously by order confirmation messages, not called directly by the frontend. |
 
 ---
 
@@ -299,18 +303,19 @@ docker-compose up --build
 
 ### Default Users (seeded on startup)
 
-| Username | Password | Role |
-|---|---|---|
-| `admin` | `adminPass` | ADMIN + SELLER + USER |
-| `seller1` | `password2` | SELLER |
-| `user1` | `password1` | USER |
-| `user2` | `password1` | USER |
+| Username  | Password    | Role                  |
+| --------- | ----------- | --------------------- |
+| `admin`   | `adminPass` | ADMIN + SELLER + USER |
+| `seller1` | `password2` | SELLER                |
+| `user1`   | `password1` | USER                  |
+| `user2`   | `password1` | USER                  |
 
 ---
 
 ## Known Limitations & Future Improvements
 
 **Current limitations:**
+
 - No circuit breaker — if product-service is down, order placement fails with an unhandled exception rather than a graceful fallback
 - No distributed tracing — debugging cross-service issues requires correlating logs manually across containers
 - No rate limiting at the gateway level
@@ -321,6 +326,7 @@ docker-compose up --build
 - Seller order queries load all orders into memory before filtering (`getAllSellerOrders` uses in-memory pagination)
 
 **On the roadmap:**
+
 - Resilience4j circuit breaker for inter-service calls
 - Prometheus + Grafana for observability
 - Centralized logging (ELK or Loki)
