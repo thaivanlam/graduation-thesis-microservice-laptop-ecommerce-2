@@ -1,7 +1,5 @@
 # Laptop E-Commerce Platform — Microservices Architecture
 
-test
-
 A full-stack laptop e-commerce platform built with **Spring Boot 3.5**, **Spring Cloud 2025**, and **React**, following a microservices architecture pattern. The system supports multi-role users (Customer, Seller, Admin), product catalog with technical specifications, shopping cart, Stripe-powered checkout, and asynchronous email notifications.
 
 ## 📌 Related Repository
