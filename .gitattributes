@@ -1,0 +1,4 @@
+# Scripts and SQL are executed inside Linux containers — CRLF would break the
+# shell seeder, so keep these LF in the working tree on every platform.
+*.sh text eol=lf
+*.sql text eol=lf
