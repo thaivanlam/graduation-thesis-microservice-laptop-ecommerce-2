@@ -8,13 +8,20 @@ services:
     container_name: mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: ecommerce
+      # No MYSQL_DATABASE on purpose. It would create `ecommerce` first, with
+      # the server default collation, turning the CREATE DATABASE in
+      # init-db/01-create-databases.sql into a no-op and leaving the three
+      # schemas on inconsistent collations. The init script owns all three.
     ports:
       # Host port only — services reach MySQL as mysql:3306 on the network.
       # Override MYSQL_PORT when a local mysqld already holds 3306.
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      # Runs once, when mysql_data is first created and before any service
+      # starts: creates the three logical databases. It cannot insert rows —
+      # Hibernate has not created the tables at that point (see seed-db/).
+      - ./init-db:/docker-entrypoint-initdb.d:ro
     networks:
       - ecommerce-network
     healthcheck:
@@ -39,6 +46,35 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # =====================
+  # DEMO DATA SEEDER
+  # =====================
+  # One-shot container, opt-in through the `seed` profile:
+  #   COMPOSE_PROFILES=prod,seed docker compose up
+  #
+  # It waits for product-service to create its tables, then loads a demo
+  # catalogue. Deliberately no `depends_on: product-service` — that service has
+  # no healthcheck, an open port would not prove the tables exist, and a
+  # cross-profile dependency breaks when `seed` runs without `prod`. The script
+  # polls information_schema for the real signal instead.
+  db-seed:
+    image: mysql:8.0
+    container_name: db-seed
+    profiles: ["seed"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+    volumes:
+      - ./seed-db:/seed:ro
+    entrypoint: ["bash", "/seed/run-seed.sh"]
+    networks:
+      - ecommerce-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
 
   # =====================
   # CONFIG SERVER
