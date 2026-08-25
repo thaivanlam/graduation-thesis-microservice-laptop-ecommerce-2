@@ -11,7 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/products")
+@RequestMapping("/api")
 @Tag(name = "Product Specifications", description = "APIs for managing product technical specifications")
 public class ProductSpecificationController {
 
@@ -19,7 +19,7 @@ public class ProductSpecificationController {
     private ProductSpecificationService specificationService;
 
     @Operation(summary = "Add or update product specifications (Admin)")
-    @PostMapping("/admin/{productId}/specifications")
+    @PostMapping("/admin/products/{productId}/specifications")
     public ResponseEntity<ProductSpecificationDTO> createOrUpdateSpecificationAdmin(
             @PathVariable Long productId,
             @Valid @RequestBody ProductSpecificationDTO specDTO) {
@@ -28,7 +28,7 @@ public class ProductSpecificationController {
     }
 
     @Operation(summary = "Add or update product specifications (Seller)")
-    @PostMapping("/seller/{productId}/specifications")
+    @PostMapping("/seller/products/{productId}/specifications")
     public ResponseEntity<ProductSpecificationDTO> createOrUpdateSpecificationSeller(
             @PathVariable Long productId,
             @Valid @RequestBody ProductSpecificationDTO specDTO) {
@@ -37,21 +37,21 @@ public class ProductSpecificationController {
     }
 
     @Operation(summary = "Get product specifications")
-    @GetMapping("/public/{productId}/specifications")
+    @GetMapping("/public/products/{productId}/specifications")
     public ResponseEntity<ProductSpecificationDTO> getSpecification(@PathVariable Long productId) {
         ProductSpecificationDTO spec = specificationService.getSpecificationByProductId(productId);
         return ResponseEntity.ok(spec);
     }
 
     @Operation(summary = "Delete product specifications (Admin)")
-    @DeleteMapping("/admin/{productId}/specifications")
+    @DeleteMapping("/admin/products/{productId}/specifications")
     public ResponseEntity<Void> deleteSpecificationAdmin(@PathVariable Long productId) {
         specificationService.deleteSpecification(productId);
         return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Delete product specifications (Seller)")
-    @DeleteMapping("/seller/{productId}/specifications")
+    @DeleteMapping("/seller/products/{productId}/specifications")
     public ResponseEntity<Void> deleteSpecificationSeller(@PathVariable Long productId) {
         specificationService.deleteSpecification(productId);
         return ResponseEntity.noContent().build();
