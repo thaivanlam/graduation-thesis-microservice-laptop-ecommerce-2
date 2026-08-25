@@ -76,6 +76,8 @@ gateway:
     role-mappings:
       - pattern: /product-manager/api/admin/**
         roles: [ROLE_ADMIN]
+      - pattern: /product-manager/api/seller/**
+        roles: [ROLE_SELLER]
       - pattern: /user-manager/api/admin/**
         roles: [ROLE_ADMIN]
       - pattern: /order-manager/api/admin/**
