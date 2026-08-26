@@ -1,0 +1,43 @@
+# Test-only configuration for product-service.
+#
+# This file shadows src/main/resources/application.yaml on the test classpath, so
+# the test JVM never contacts the Config Server, Eureka or MySQL. Every value here
+# is throw-away: the JWT secret below signs tokens that only exist inside a test run.
+spring:
+  application:
+    name: product-service
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+  datasource:
+    url: jdbc:h2:mem:product_test;DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+    show-sql: false
+  app:
+    jwtSecret: dGVjaHpvbmUtdGVzdC1vbmx5LWp3dC1zaWduaW5nLXNlY3JldC1ub3QtdXNlZC1pbi1hbnktcmVhbC1lbnYtMDE=
+  ecom:
+    app:
+      jwtCookieName: springBootEcom
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+project:
+  image: target/test-images/
+
+image:
+  base:
+    url: http://localhost:8081/images

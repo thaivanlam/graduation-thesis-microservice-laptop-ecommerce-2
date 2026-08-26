@@ -1,0 +1,31 @@
+# Test-only configuration for notification-service.
+#
+# The deployed application.yml sets spring.cloud.config.fail-fast, which makes the context
+# refuse to start unless a Config Server answers. This file shadows it on the test
+# classpath so the suite runs offline: no Config Server, no Eureka, no SMTP host contacted
+# (JavaMailSender is only ever a test double here).
+spring:
+  application:
+    name: notification-service
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+  mail:
+    host: localhost
+    port: 3025
+    username: no-reply@techzone.test
+    password: test-only-not-a-real-secret
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+queue:
+  notification:
+    queue: notification-queue
+    exchange: notification-exchange
+    routing-key: notification-routing-key

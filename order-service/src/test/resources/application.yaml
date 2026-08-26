@@ -1,0 +1,44 @@
+# Test-only configuration for order-service. See product-service for the rationale.
+spring:
+  application:
+    name: order-service
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+  datasource:
+    url: jdbc:h2:mem:order_test;DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  app:
+    jwtSecret: dGVjaHpvbmUtdGVzdC1vbmx5LWp3dC1zaWduaW5nLXNlY3JldC1ub3QtdXNlZC1pbi1hbnktcmVhbC1lbnYtMDE=
+  ecom:
+    app:
+      jwtCookieName: springBootEcom
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+queue:
+  notification:
+    exchange: notification-exchange
+    routing-key: notification-routing-key
+
+product:
+  service:
+    base-url: http://product-service-under-test/api
+
+stripe:
+  secret:
+    key: sk_test_placeholder_never_contacted
