@@ -326,11 +326,40 @@ docker-compose up --build
 **On the roadmap:**
 
 - Resilience4j circuit breaker for inter-service calls
-- Prometheus + Grafana for observability
 - Centralized logging (ELK or Loki)
+- Distributed tracing (Micrometer Tracing into Tempo or Jaeger)
 - Redis for session/cache layer
 - Kubernetes deployment manifests
-- Load testing with JMeter (Smoke → Load → Stress → Spike strategy)
+
+---
+
+## Observability
+
+Every service exposes a Micrometer registry at `/actuator/prometheus`
+(`health`, `info`, `metrics` and `prometheus` are the only endpoints exposed).
+Prometheus scrapes all seven every 10 seconds; Grafana serves two dashboards
+provisioned from [`observability/grafana/dashboards/`](observability/grafana/dashboards).
+Both containers sit behind the `observability` Compose profile, so they are
+opt-in:
+
+```bash
+COMPOSE_PROFILES=prod,observability docker compose up -d
+```
+
+| Address | What it is |
+| --- | --- |
+| <http://localhost:3001> | Grafana — service overview, and per-endpoint latency for the ordering and catalogue APIs |
+| <http://localhost:9090> | Prometheus — queries, target health, firing alerts |
+
+Configuration lives in [`observability/`](observability) (scrape config,
+alert rules, Grafana provisioning) and in each service's management block —
+for the four business services, in the Config Server files under
+`config-server/src/main/resources/config/`.
+
+The load generator that these dashboards are read against is JMeter, in the
+superproject's `tests/load/`. Full write-up: `docs/operations/observability.md`
+and `docs/quality/performance-testing.md` in the
+[superproject](#-related-repository).
 
 ## License
 
