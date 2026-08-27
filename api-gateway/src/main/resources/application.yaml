@@ -112,3 +112,33 @@ springdoc:
         url: /product-manager/v3/api-docs
       - name: ORDER-SERVICE
         url: /order-manager/v3/api-docs
+
+# ---------------------------------------------------------------------
+# OBSERVABILITY — Micrometer -> Prometheus
+# ---------------------------------------------------------------------
+# The gateway is the only place a request is seen once, whichever service
+# answers it, so its metrics are the platform-level view of latency,
+# throughput and errors. Two families matter:
+#   http.server.requests           — the Netty server side, per URI
+#   spring.cloud.gateway.requests  — per route id, enabled automatically once
+#                                    actuator is on the classpath
+# Both get an explicit histogram; percentiles cannot be recovered from a
+# count and a sum after the fact. See docs/operations/observability.md.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        spring.cloud.gateway.requests: true
+      slo:
+        http.server.requests: 100ms,200ms,500ms,1s,2s
+        spring.cloud.gateway.requests: 100ms,200ms,500ms,1s,2s

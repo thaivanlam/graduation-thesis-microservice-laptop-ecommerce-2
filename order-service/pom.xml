@@ -108,6 +108,18 @@
 			<artifactId>h2</artifactId>
 			<scope>test</scope>
 		</dependency>
+
+        <!-- Metrics: /actuator/prometheus, scraped by the observability stack.
+             See docs/operations/observability.md in the superproject. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
 	</dependencies>
 
     <dependencyManagement>

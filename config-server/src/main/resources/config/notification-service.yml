@@ -13,3 +13,37 @@ spring:
 
 server:
   port: 8084
+  tomcat:
+    # Tomcat publishes its thread-pool counters through JMX only, and
+    # Micrometer's TomcatMetrics binds to that registry. Without this flag
+    # tomcat_threads_* is simply absent — an empty "busy threads" panel.
+    mbeanregistry:
+      enabled: true
+
+# ---------------------------------------------------------------------
+# OBSERVABILITY — Micrometer -> Prometheus
+# ---------------------------------------------------------------------
+# `prometheus` is the scrape endpoint the Prometheus container reads every
+# 10s; `health` and `info` are what a human and Compose read. Nothing else is
+# exposed, and none of it is routed at the gateway, so the endpoints are
+# reachable only from inside the Docker network.
+#
+# The histogram on http.server.requests is what makes latency percentiles
+# possible: without it Prometheus only ever sees a count and a sum, and a p95
+# cannot be computed after the fact. See docs/operations/observability.md.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 100ms,200ms,500ms,1s,2s
