@@ -1,0 +1,19 @@
+# Grafana reads this at start-up; there is no click-through setup and no
+# dashboard state worth preserving between runs.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    # Fixed uid: the provisioned dashboards reference this datasource by uid,
+    # so it must not be generated.
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches global.scrape_interval in prometheus.yml, so Grafana's
+      # "auto" step never asks for a resolution the data does not have.
+      timeInterval: 10s
+      httpMethod: POST

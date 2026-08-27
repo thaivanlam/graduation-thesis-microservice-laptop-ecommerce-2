@@ -1,0 +1,62 @@
+# =====================================================================
+# Recording and alerting rules
+#
+# The recording rules exist so the dashboards and the alerts compute latency
+# and error rate the same way — a dashboard that disagrees with the alert that
+# woke you is worse than having neither.
+#
+# There is no Alertmanager in this stack: alerts show as "firing" in the
+# Prometheus UI (Alerts tab) and nothing is delivered anywhere. That is
+# intentional for a thesis-scale deployment; wiring a receiver is a
+# configuration change, not a code change.
+# =====================================================================
+
+groups:
+  - name: techzone-recording
+    interval: 10s
+    rules:
+      # Requests per second, per service.
+      - record: techzone:request_rate:5m
+        expr: sum by (application) (rate(http_server_requests_seconds_count[5m]))
+
+      # Share of requests answered with 5xx. Client errors are excluded: a 401
+      # on an expired cookie is the platform working, not failing.
+      - record: techzone:error_ratio:5m
+        expr: |
+          sum by (application) (rate(http_server_requests_seconds_count{outcome="SERVER_ERROR"}[5m]))
+            /
+          clamp_min(sum by (application) (rate(http_server_requests_seconds_count[5m])), 0.001)
+
+      # 95th percentile latency, in seconds.
+      - record: techzone:latency_p95:5m
+        expr: histogram_quantile(0.95, sum by (application, le) (rate(http_server_requests_seconds_bucket[5m])))
+
+  - name: techzone-alerts
+    interval: 10s
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"techzone-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.application }} is not answering scrapes"
+          description: "No successful scrape of {{ $labels.instance }} for a minute. Check `docker compose ps` and the container log."
+
+      - alert: HighServerErrorRate
+        expr: techzone:error_ratio:5m > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.application }} is returning 5xx for more than 5% of requests"
+          description: "Sustained for two minutes. Under a load run this usually means a saturated Tomcat pool or an exhausted Hikari pool rather than a new defect."
+
+      - alert: SlowResponses
+        expr: techzone:latency_p95:5m > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.application }} p95 latency is above 1s"
+          description: "Deliberately looser than the 500ms budget NFR-PRF-1 sets for a catalogue page: an alert that fires on a near-miss gets ignored. Compare against the runs in docs/quality/performance-testing.md before treating it as a regression."

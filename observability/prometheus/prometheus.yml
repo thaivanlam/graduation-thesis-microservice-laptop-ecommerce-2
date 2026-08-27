@@ -1,0 +1,101 @@
+# =====================================================================
+# Prometheus — scrape configuration for the TechZone stack
+#
+# Every service exposes Micrometer's registry at /actuator/prometheus. The
+# targets below are Compose service names, resolved on `ecommerce-network`;
+# Prometheus therefore only works from inside that network, which is also why
+# nothing here needs credentials.
+#
+# A 10s interval is short for a production system and deliberate here: a load
+# run lasts minutes, not hours, and a 30s interval would leave a five-point
+# graph. See docs/operations/observability.md in the superproject.
+# =====================================================================
+
+global:
+  scrape_interval: 10s
+  scrape_timeout: 5s
+  evaluation_interval: 10s
+  external_labels:
+    stack: techzone
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # The five instrumented business-facing JVMs. `application` duplicates the
+  # Micrometer common tag on purpose: it means `up` can be joined to the
+  # application metrics by the same label.
+  - job_name: techzone-services
+    metrics_path: /actuator/prometheus
+    # The exposed metrics already carry `application` as a Micrometer common
+    # tag with the same value; honouring it keeps one label instead of a
+    # second, prefixed `exported_application`.
+    honor_labels: true
+    static_configs:
+      - targets: ["api-gateway:8080"]
+        labels:
+          application: api-gateway
+          tier: edge
+      - targets: ["user-service:8082"]
+        labels:
+          application: user-service
+          tier: business
+      - targets: ["product-service:8081"]
+        labels:
+          application: product-service
+          tier: business
+      - targets: ["order-service:8083"]
+        labels:
+          application: order-service
+          tier: business
+      - targets: ["notification-service:8084"]
+        labels:
+          application: notification-service
+          tier: business
+
+  # Platform services. Scraped so that "is the stack healthy?" has one answer,
+  # not two; they carry almost no request traffic of their own.
+  - job_name: techzone-platform
+    metrics_path: /actuator/prometheus
+    # The exposed metrics already carry `application` as a Micrometer common
+    # tag with the same value; honouring it keeps one label instead of a
+    # second, prefixed `exported_application`.
+    honor_labels: true
+    static_configs:
+      - targets: ["config-server:8888"]
+        labels:
+          application: config-server
+          tier: platform
+      - targets: ["discovery-service:8761"]
+        labels:
+          application: discovery-service
+          tier: platform
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+# ---------------------------------------------------------------------
+# Mode 3 (hybrid dev), where the business services run from the IDE on the
+# host rather than as containers. The names above resolve to nothing then;
+# these do. Uncomment this job, comment out `techzone-services`, and reload
+# with: curl -X POST http://localhost:9090/-/reload
+#
+# `host.docker.internal` is provided by Docker Desktop; on plain Linux add
+#   extra_hosts: ["host.docker.internal:host-gateway"]
+# to the prometheus service in docker-compose.yml first.
+# ---------------------------------------------------------------------
+# - job_name: techzone-hybrid-dev
+#   metrics_path: /actuator/prometheus
+#   honor_labels: true
+#   static_configs:
+#     - targets: ["host.docker.internal:8080"]
+#       labels: { application: api-gateway, tier: edge }
+#     - targets: ["host.docker.internal:8081"]
+#       labels: { application: product-service, tier: business }
+#     - targets: ["host.docker.internal:8082"]
+#       labels: { application: user-service, tier: business }
+#     - targets: ["host.docker.internal:8083"]
+#       labels: { application: order-service, tier: business }
+#     - targets: ["host.docker.internal:8084"]
+#       labels: { application: notification-service, tier: business }

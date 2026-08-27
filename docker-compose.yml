@@ -234,7 +234,8 @@ services:
     depends_on:
       discovery-service:
         condition: service_healthy
-    # No actuator on the gateway, so probe the listening port instead.
+    # The runtime image ships neither curl nor wget, so probe the listening
+    # port rather than /actuator/health.
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/8080' || exit 1"]
       interval: 10s
@@ -242,8 +243,75 @@ services:
       retries: 10
       start_period: 30s
 
+
+  # =====================
+  # OBSERVABILITY
+  # =====================
+  # Opt-in through the `observability` profile, so the everyday stack stays as
+  # small as it was:
+  #   COMPOSE_PROFILES=prod,observability docker compose up -d
+  #
+  # Deliberately no `depends_on` on the business services: they live in the
+  # `prod` profile, and a cross-profile dependency breaks when `observability`
+  # is started on its own (the same trap documented on db-seed above).
+  # Prometheus retries a target it cannot reach, so a service that starts two
+  # minutes later simply appears in the graphs two minutes later.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    profiles: ["observability"]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # A fortnight is far more than a laptop run needs and costs little; the
+      # point is that a load run from last week is still comparable.
+      - "--storage.tsdb.retention.time=15d"
+      # Allows `curl -X POST localhost:9090/-/reload` after editing
+      # prometheus.yml, instead of restarting the container.
+      - "--web.enable-lifecycle"
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    profiles: ["observability"]
+    ports:
+      # 3000 inside the container, published on 3001 by default: port 3000 is
+      # one of the frontend dev origins the gateway allows for CORS, so it is
+      # left free for a Vite server.
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Read-only viewing without a login: the dashboards carry no secrets and
+      # this is a local stack. Editing still needs the admin account, and
+      # provisioned dashboards are read-only in the UI regardless.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 5s
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - ecommerce-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   mysql_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   ecommerce-network:
