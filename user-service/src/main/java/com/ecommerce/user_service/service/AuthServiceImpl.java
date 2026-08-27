@@ -11,10 +11,13 @@ import com.ecommerce.user_service.payload.UserResponse;
 import com.ecommerce.user_service.repositories.RoleRepository;
 import com.ecommerce.user_service.repositories.UserRepository;
 import com.ecommerce.user_service.security.jwt.JwtUtils;
+import com.ecommerce.user_service.security.request.ChangePasswordRequest;
 import com.ecommerce.user_service.security.request.LoginRequest;
 import com.ecommerce.user_service.security.request.SignupRequest;
+import com.ecommerce.user_service.security.request.VerifyPasswordRequest;
 import com.ecommerce.user_service.security.response.MessageResponse;
 import com.ecommerce.user_service.security.response.UserInfoResponse;
+import com.ecommerce.user_service.util.AuthUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
 import org.modelmapper.ModelMapper;
@@ -51,6 +54,9 @@ public class AuthServiceImpl implements AuthService {
 
     @Autowired
     private NotificationProducer notificationProducer;
+
+    @Autowired
+    private AuthUtil authUtil;
 
 
     @Override
@@ -239,5 +245,40 @@ public class AuthServiceImpl implements AuthService {
 
         userRepository.delete(user);
         return new MessageResponse("Seller deleted successfully");
+    }
+
+    @Override
+    public MessageResponse verifyCurrentPassword(VerifyPasswordRequest verifyPasswordRequest) {
+        User user = authUtil.loggedInUser();
+
+        if (!passwordEncoder.matches(verifyPasswordRequest.getCurrentPassword(), user.getPassword())) {
+            throw new APIException("Current password is incorrect");
+        }
+
+        return new MessageResponse("Password verified");
+    }
+
+    @Override
+    public MessageResponse changePassword(ChangePasswordRequest changePasswordRequest) {
+        User user = authUtil.loggedInUser();
+
+        if (!passwordEncoder.matches(changePasswordRequest.getCurrentPassword(), user.getPassword())) {
+            throw new APIException("Current password is incorrect");
+        }
+
+        if (!changePasswordRequest.getNewPassword().equals(changePasswordRequest.getConfirmPassword())) {
+            throw new APIException("New password and confirmation do not match");
+        }
+
+        if (passwordEncoder.matches(changePasswordRequest.getNewPassword(), user.getPassword())) {
+            throw new APIException("New password must be different from the current password");
+        }
+
+        user.setPassword(passwordEncoder.encode(changePasswordRequest.getNewPassword()));
+        userRepository.save(user);
+
+        notificationProducer.sendPasswordChangedEmail(user.getEmail(), user.getUserName());
+
+        return new MessageResponse("Password changed successfully");
     }
 }

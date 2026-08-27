@@ -27,4 +27,14 @@ public class NotificationProducer {
 
         rabbitTemplate.convertAndSend(notificationExchange, notificationRoutingKey, notificationEmail);
     }
+
+    public void sendPasswordChangedEmail(String email, String username) {
+        NotificationEmail notificationEmail = NotificationEmail.builder()
+                .recipient(email)
+                .subject("Your password has been changed")
+                .msgBody("Hi " + username + ", your account password was just changed. If you did not make this change, please contact support immediately.")
+                .build();
+
+        rabbitTemplate.convertAndSend(notificationExchange, notificationRoutingKey, notificationEmail);
+    }
 }
