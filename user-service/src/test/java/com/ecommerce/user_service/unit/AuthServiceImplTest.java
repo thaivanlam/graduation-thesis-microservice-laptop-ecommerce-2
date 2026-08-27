@@ -9,11 +9,14 @@ import com.ecommerce.user_service.payload.AuthenticationResult;
 import com.ecommerce.user_service.repositories.RoleRepository;
 import com.ecommerce.user_service.repositories.UserRepository;
 import com.ecommerce.user_service.security.jwt.JwtUtils;
+import com.ecommerce.user_service.security.request.ChangePasswordRequest;
 import com.ecommerce.user_service.security.request.LoginRequest;
 import com.ecommerce.user_service.security.request.SignupRequest;
+import com.ecommerce.user_service.security.request.VerifyPasswordRequest;
 import com.ecommerce.user_service.security.response.MessageResponse;
 import com.ecommerce.user_service.service.AuthServiceImpl;
 import com.ecommerce.user_service.service.NotificationProducer;
+import com.ecommerce.user_service.util.AuthUtil;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -69,6 +72,9 @@ class AuthServiceImplTest {
 
     @Mock
     private NotificationProducer notificationProducer;
+
+    @Mock
+    private AuthUtil authUtil;
 
     @Spy
     private ModelMapper modelMapper = new ModelMapper();
@@ -390,6 +396,117 @@ class AuthServiceImplTest {
             assertThatThrownBy(() -> authService.deleteCustomer(404L))
                     .isInstanceOf(ResourceNotFoundException.class)
                     .hasMessageContaining("User not found with userId: 404");
+        }
+    }
+
+    @Nested
+    @DisplayName("verifyCurrentPassword")
+    class VerifyCurrentPassword {
+
+        @Test
+        @DisplayName("confirms a matching current password without changing anything")
+        void confirmsMatchingPassword() {
+            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
+            when(authUtil.loggedInUser()).thenReturn(buyer);
+            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
+
+            VerifyPasswordRequest request = new VerifyPasswordRequest();
+            request.setCurrentPassword("correct-password");
+
+            MessageResponse response = authService.verifyCurrentPassword(request);
+
+            assertThat(response.getMessage()).isEqualTo("Password verified");
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("refuses a wrong current password")
+        void refusesWrongPassword() {
+            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
+            when(authUtil.loggedInUser()).thenReturn(buyer);
+            when(passwordEncoder.matches("wrong-password", "hashed-password")).thenReturn(false);
+
+            VerifyPasswordRequest request = new VerifyPasswordRequest();
+            request.setCurrentPassword("wrong-password");
+
+            assertThatThrownBy(() -> authService.verifyCurrentPassword(request))
+                    .isInstanceOf(APIException.class)
+                    .hasMessageContaining("Current password is incorrect");
+        }
+    }
+
+    @Nested
+    @DisplayName("changePassword")
+    class ChangePassword {
+
+        private ChangePasswordRequest request(String current, String next, String confirm) {
+            ChangePasswordRequest request = new ChangePasswordRequest();
+            request.setCurrentPassword(current);
+            request.setNewPassword(next);
+            request.setConfirmPassword(confirm);
+            return request;
+        }
+
+        @Test
+        @DisplayName("hashes and stores the new password, then notifies the user by email")
+        void changesPasswordAndNotifies() {
+            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
+            when(authUtil.loggedInUser()).thenReturn(buyer);
+            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
+            when(passwordEncoder.matches("new-password", "hashed-password")).thenReturn(false);
+            when(passwordEncoder.encode("new-password")).thenReturn("new-hashed-password");
+
+            MessageResponse response = authService.changePassword(request("correct-password", "new-password", "new-password"));
+
+            assertThat(response.getMessage()).isEqualTo("Password changed successfully");
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(captor.capture());
+            assertThat(captor.getValue().getPassword()).isEqualTo("new-hashed-password");
+            verify(notificationProducer).sendPasswordChangedEmail("buyer@techzone.test", "buyer1");
+        }
+
+        @Test
+        @DisplayName("refuses a wrong current password without touching the stored password")
+        void refusesWrongCurrentPassword() {
+            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
+            when(authUtil.loggedInUser()).thenReturn(buyer);
+            when(passwordEncoder.matches("wrong-password", "hashed-password")).thenReturn(false);
+
+            assertThatThrownBy(() -> authService.changePassword(request("wrong-password", "new-password", "new-password")))
+                    .isInstanceOf(APIException.class)
+                    .hasMessageContaining("Current password is incorrect");
+
+            verify(userRepository, never()).save(any(User.class));
+            verify(notificationProducer, never()).sendPasswordChangedEmail(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("refuses when the new password and confirmation do not match")
+        void refusesMismatchedConfirmation() {
+            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
+            when(authUtil.loggedInUser()).thenReturn(buyer);
+            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
+
+            assertThatThrownBy(() -> authService.changePassword(request("correct-password", "new-password", "different-password")))
+                    .isInstanceOf(APIException.class)
+                    .hasMessageContaining("do not match");
+
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("refuses a new password identical to the current one")
+        void refusesSamePassword() {
+            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
+            when(authUtil.loggedInUser()).thenReturn(buyer);
+            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
+            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
+
+            assertThatThrownBy(() -> authService.changePassword(request("correct-password", "correct-password", "correct-password")))
+                    .isInstanceOf(APIException.class)
+                    .hasMessageContaining("must be different");
+
+            verify(userRepository, never()).save(any(User.class));
         }
     }
 }
