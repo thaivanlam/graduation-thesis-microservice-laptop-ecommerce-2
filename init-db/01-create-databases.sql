@@ -13,6 +13,7 @@
 --   ecommerce          user-service     (users, roles, addresses)
 --   ecommerce_product  product-service  (catalogue, specifications)
 --   ecommerce_order    order-service    (carts, orders, payments)
+--   keycloak           Keycloak         (realm, accounts, credentials, sessions)
 --
 -- The JDBC URLs still carry `createDatabaseIfNotExist=true`, which is what
 -- keeps the non-Docker `dev` profile working. Declaring the databases here
@@ -26,4 +27,12 @@ CREATE DATABASE IF NOT EXISTS `ecommerce_product`
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE DATABASE IF NOT EXISTS `ecommerce_order`
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- Keycloak's own store (ADR-0012). It owns this schema outright and creates its
+-- tables on first start; nothing in this project reads or writes it directly.
+-- KC_DB_URL also carries createDatabaseIfNotExist=true, so a stack whose
+-- mysql_data volume predates ADR-0012 — where this script has already run and
+-- will not run again — still comes up.
+CREATE DATABASE IF NOT EXISTS `keycloak`
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

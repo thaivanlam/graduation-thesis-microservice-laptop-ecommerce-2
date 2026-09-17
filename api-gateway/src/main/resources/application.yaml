@@ -1,12 +1,27 @@
 spring:
   application:
     name: api-gateway
-  app:
-    jwtSecret: mySecretKey123912738fsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfgfdhrher
-    jwtExpirationMs: 3000000
-  ecom:
-    app:
-      jwtCookieName: springBootEcom
+
+  # -------------------------------------------------------------------
+  # ADR-0012 — Keycloak as the identity provider
+  # -------------------------------------------------------------------
+  # Access tokens are RS256 and are verified locally against the realm's cached
+  # JWKS. The gateway holds no signing key, so it cannot mint a token; Keycloak
+  # is a dependency of signing in, not of an already authenticated request.
+  #
+  # Two URLs, not one, and the distinction is load-bearing. `iss` in the token
+  # is whatever host the browser used to obtain it, so issuer-uri must be the
+  # PUBLIC address and is only ever compared, never fetched. jwk-set-uri is the
+  # address this container can actually reach, and is the one called. Setting
+  # both also skips OIDC discovery, so the gateway starts even if Keycloak is
+  # still coming up.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8090/realms/techzone}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8090/realms/techzone/protocol/openid-connect/certs}
+
 
   cloud:
     gateway:

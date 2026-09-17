@@ -1,18 +1,13 @@
 package com.ecommerce.user_service.unit;
 
 import com.ecommerce.user_service.exceptions.APIException;
-import com.ecommerce.user_service.exceptions.ResourceNotFoundException;
 import com.ecommerce.user_service.model.AppRole;
 import com.ecommerce.user_service.model.Role;
 import com.ecommerce.user_service.model.User;
-import com.ecommerce.user_service.payload.AuthenticationResult;
+import com.ecommerce.user_service.payload.CreateUserRequest;
 import com.ecommerce.user_service.repositories.RoleRepository;
 import com.ecommerce.user_service.repositories.UserRepository;
-import com.ecommerce.user_service.security.jwt.JwtUtils;
-import com.ecommerce.user_service.security.request.ChangePasswordRequest;
-import com.ecommerce.user_service.security.request.LoginRequest;
-import com.ecommerce.user_service.security.request.SignupRequest;
-import com.ecommerce.user_service.security.request.VerifyPasswordRequest;
+import com.ecommerce.user_service.security.KeycloakAdminClient;
 import com.ecommerce.user_service.security.response.MessageResponse;
 import com.ecommerce.user_service.service.AuthServiceImpl;
 import com.ecommerce.user_service.service.NotificationProducer;
@@ -24,19 +19,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.modelmapper.ModelMapper;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseCookie;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.server.ResponseStatusException;
 
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
 
@@ -44,31 +31,36 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link AuthServiceImpl}: sign-in, registration and the guards around
- * deleting an account. The password encoder, the repositories and the JWT component are
- * all test doubles, so what is under test is the decision logic alone.
+ * What user-service still decides about accounts, after ADR-0012 moved the deciding of
+ * <em>who someone is</em> to Keycloak.
+ *
+ * <p>The old version of this class tested {@code login} and {@code register}: a BCrypt
+ * comparison, a token, a cookie, and a {@code switch} that mapped the string {@code "admin"}
+ * from a public request body onto {@code ROLE_ADMIN}. None of those methods exist any more.
+ * What is left worth testing is the one decision the platform still makes about roles — the
+ * allow-list on {@code POST /api/admin/users} — and it is the decision SEC-01 turns on, so
+ * it is tested from several directions.</p>
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("Unit - AuthServiceImpl")
+@DisplayName("Unit - AuthServiceImpl (user-service)")
 class AuthServiceImplTest {
-
-    @Mock
-    private JwtUtils jwtUtils;
 
     @Mock
     private UserRepository userRepository;
 
     @Mock
-    private PasswordEncoder passwordEncoder;
+    private RoleRepository roleRepository;
 
     @Mock
-    private RoleRepository roleRepository;
+    private ModelMapper modelMapper;
 
     @Mock
     private NotificationProducer notificationProducer;
@@ -76,437 +68,201 @@ class AuthServiceImplTest {
     @Mock
     private AuthUtil authUtil;
 
-    @Spy
-    private ModelMapper modelMapper = new ModelMapper();
+    @Mock
+    private KeycloakAdminClient keycloakAdminClient;
 
     @InjectMocks
     private AuthServiceImpl authService;
 
-    private static User user(Long id, String userName, String email, AppRole... roles) {
-        User user = new User(userName, email, "hashed-password");
-        user.setUserId(id);
-        Set<Role> roleSet = new LinkedHashSet<>();
-        for (AppRole role : roles) {
-            roleSet.add(new Role(role));
-        }
-        user.setRoles(roleSet);
-        return user;
-    }
-
-    private static SignupRequest signupRequest(String username, String email, String password, Set<String> roles) {
-        SignupRequest request = new SignupRequest();
-        request.setUsername(username);
+    private static CreateUserRequest request(String email, String role) {
+        CreateUserRequest request = new CreateUserRequest();
         request.setEmail(email);
-        request.setPassword(password);
-        request.setRoles(roles);
+        request.setFirstName("Demo");
+        request.setLastName("Account");
+        request.setRole(role);
         return request;
     }
 
-    private static LoginRequest loginRequest(String username, String password) {
-        LoginRequest request = new LoginRequest();
-        request.setUsername(username);
-        request.setPassword(password);
-        return request;
+    private void realmAccepts(String email, String keycloakId) {
+        when(userRepository.existsByEmail(email)).thenReturn(false);
+        when(keycloakAdminClient.createUser(eq(email), anyString(), anyString(), anyString()))
+                .thenReturn(keycloakId);
+        when(roleRepository.findByRoleName(any(AppRole.class)))
+                .thenAnswer(call -> Optional.of(new Role(call.getArgument(0))));
+        when(userRepository.save(any(User.class))).thenAnswer(call -> call.getArgument(0));
     }
 
     @Nested
-    @DisplayName("login")
-    class Login {
+    @DisplayName("createUser - the role allow-list")
+    class RoleAllowList {
 
         @Test
-        @DisplayName("returns the identity, the token and the auth cookie for correct credentials")
-        void signsInValidUser() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(userRepository.findByUserName("buyer1")).thenReturn(Optional.of(buyer));
-            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
-            when(jwtUtils.generateToken(buyer)).thenReturn("signed.jwt.token");
-            when(jwtUtils.generateJwtCookie("signed.jwt.token"))
-                    .thenReturn(ResponseCookie.from("springBootEcom", "signed.jwt.token").path("/").build());
+        @DisplayName("SEC-01: ROLE_ADMIN cannot be granted through the API, even by an administrator")
+        void adminRoleIsNotGrantable() {
+            // This is the regression test for the defect the whole migration started from.
+            // The endpoint is already behind a ROLE_ADMIN check, so a caller reaching it is
+            // an administrator - and it still refuses. The reasoning is in AuthServiceImpl:
+            // an allow-list makes a future flaw in this handler impossible to turn into
+            // privilege escalation, rather than merely unlikely. Promotion is a Keycloak
+            // console operation, outside the application.
+            assertThatThrownBy(() -> authService.createUser(request("newadmin@example.com", "ROLE_ADMIN")))
+                    .isInstanceOf(APIException.class)
+                    .hasMessageContaining("ROLE_ADMIN cannot be granted");
 
-            AuthenticationResult result = authService.login(loginRequest("buyer1", "correct-password"));
-
-            assertThat(result.getResponse().getId()).isEqualTo(4L);
-            assertThat(result.getResponse().getUsername()).isEqualTo("buyer1");
-            assertThat(result.getResponse().getEmail()).isEqualTo("buyer@techzone.test");
-            assertThat(result.getResponse().getRoles()).containsExactly("ROLE_USER");
-            assertThat(result.getResponse().getJwtToken()).isEqualTo("signed.jwt.token");
-            assertThat(result.getJwtCookie().getValue()).isEqualTo("signed.jwt.token");
-        }
-
-        @Test
-        @DisplayName("rejects a wrong password without minting a token")
-        void rejectsWrongPassword() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(userRepository.findByUserName("buyer1")).thenReturn(Optional.of(buyer));
-            when(passwordEncoder.matches(anyString(), anyString())).thenReturn(false);
-
-            assertThatThrownBy(() -> authService.login(loginRequest("buyer1", "wrong-password")))
-                    .isInstanceOf(ResponseStatusException.class)
-                    .hasMessageContaining("Bad credentials");
-
-            verify(jwtUtils, never()).generateToken(any(User.class));
-        }
-
-        @Test
-        @DisplayName("rejects an unknown username with the same message as a wrong password")
-        void rejectsUnknownUser() {
-            when(userRepository.findByUserName("ghost")).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> authService.login(loginRequest("ghost", "whatever")))
-                    .isInstanceOf(ResponseStatusException.class)
-                    .hasMessageContaining("Bad credentials");
-        }
-
-        @Test
-        @DisplayName("the failure is reported as 404, not 401 - a usability wart worth pinning")
-        void reportsBadCredentialsAs404() {
-            when(userRepository.findByUserName("ghost")).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> authService.login(loginRequest("ghost", "whatever")))
-                    .isInstanceOfSatisfying(ResponseStatusException.class,
-                            ex -> assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
-        }
-
-        @Test
-        @DisplayName("carries every role of a multi-role account into the response")
-        void carriesAllRoles() {
-            User staff = user(5L, "boss", "boss@techzone.test", AppRole.ROLE_SELLER, AppRole.ROLE_ADMIN);
-            when(userRepository.findByUserName("boss")).thenReturn(Optional.of(staff));
-            when(passwordEncoder.matches(anyString(), anyString())).thenReturn(true);
-            when(jwtUtils.generateToken(staff)).thenReturn("signed.jwt.token");
-            when(jwtUtils.generateJwtCookie(anyString()))
-                    .thenReturn(ResponseCookie.from("springBootEcom", "signed.jwt.token").build());
-
-            AuthenticationResult result = authService.login(loginRequest("boss", "correct-password"));
-
-            assertThat(result.getResponse().getRoles())
-                    .containsExactlyInAnyOrder("ROLE_SELLER", "ROLE_ADMIN");
-        }
-    }
-
-    @Nested
-    @DisplayName("register")
-    class Register {
-
-        @Test
-        @DisplayName("stores the password only as a hash")
-        void hashesPassword() {
-            when(userRepository.existsByUserName(anyString())).thenReturn(false);
-            when(userRepository.existsByEmail(anyString())).thenReturn(false);
-            when(passwordEncoder.encode("plain-text-password")).thenReturn("hashed-password");
-            when(roleRepository.findByRoleName(AppRole.ROLE_USER)).thenReturn(Optional.of(new Role(AppRole.ROLE_USER)));
-
-            authService.register(signupRequest("newbuyer", "new@techzone.test", "plain-text-password", null));
-
-            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(captor.capture());
-            assertThat(captor.getValue().getPassword()).isEqualTo("hashed-password");
-            assertThat(captor.getValue().getPassword()).isNotEqualTo("plain-text-password");
-        }
-
-        @Test
-        @DisplayName("defaults to ROLE_USER when no role is requested")
-        void defaultsToUserRole() {
-            when(userRepository.existsByUserName(anyString())).thenReturn(false);
-            when(userRepository.existsByEmail(anyString())).thenReturn(false);
-            when(roleRepository.findByRoleName(AppRole.ROLE_USER)).thenReturn(Optional.of(new Role(AppRole.ROLE_USER)));
-
-            ResponseEntity<MessageResponse> response =
-                    authService.register(signupRequest("newbuyer", "new@techzone.test", "password", null));
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(captor.capture());
-            assertThat(captor.getValue().getRoles()).extracting(Role::getRoleName)
-                    .containsExactly(AppRole.ROLE_USER);
-        }
-
-        @Test
-        @DisplayName("defaults to ROLE_USER when the requested role set is empty")
-        void defaultsForEmptyRoleSet() {
-            when(userRepository.existsByUserName(anyString())).thenReturn(false);
-            when(userRepository.existsByEmail(anyString())).thenReturn(false);
-            when(roleRepository.findByRoleName(AppRole.ROLE_USER)).thenReturn(Optional.of(new Role(AppRole.ROLE_USER)));
-
-            authService.register(signupRequest("newbuyer", "new@techzone.test", "password", new HashSet<>()));
-
-            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(captor.capture());
-            assertThat(captor.getValue().getRoles()).extracting(Role::getRoleName)
-                    .containsExactly(AppRole.ROLE_USER);
-        }
-
-        @Test
-        @DisplayName("maps an unrecognised role name onto ROLE_USER rather than failing")
-        void unknownRoleFallsBackToUser() {
-            when(userRepository.existsByUserName(anyString())).thenReturn(false);
-            when(userRepository.existsByEmail(anyString())).thenReturn(false);
-            when(roleRepository.findByRoleName(AppRole.ROLE_USER)).thenReturn(Optional.of(new Role(AppRole.ROLE_USER)));
-
-            authService.register(signupRequest("newbuyer", "new@techzone.test", "password", Set.of("wizard")));
-
-            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(captor.capture());
-            assertThat(captor.getValue().getRoles()).extracting(Role::getRoleName)
-                    .containsExactly(AppRole.ROLE_USER);
-        }
-
-        @Test
-        @DisplayName("SEC-01 characterisation: a caller can grant itself ROLE_ADMIN at sign-up")
-        void selfServiceAdminIsAccepted() {
-            // The registration endpoint honours whatever role set the request asks for, with
-            // no authentication and no allow-list. This is the highest-severity finding in
-            // docs/backend/known-defects.md (SEC-01). The test states the current behaviour
-            // plainly so that closing the hole is an intentional, visible change.
-            when(userRepository.existsByUserName(anyString())).thenReturn(false);
-            when(userRepository.existsByEmail(anyString())).thenReturn(false);
-            when(roleRepository.findByRoleName(AppRole.ROLE_ADMIN))
-                    .thenReturn(Optional.of(new Role(AppRole.ROLE_ADMIN)));
-
-            ResponseEntity<MessageResponse> response =
-                    authService.register(signupRequest("attacker", "attacker@example.test", "password", Set.of("admin")));
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(captor.capture());
-            assertThat(captor.getValue().getRoles()).extracting(Role::getRoleName)
-                    .containsExactly(AppRole.ROLE_ADMIN);
-        }
-
-        @Test
-        @DisplayName("refuses a username that is already taken")
-        void refusesDuplicateUsername() {
-            when(userRepository.existsByUserName("buyer1")).thenReturn(true);
-
-            ResponseEntity<MessageResponse> response =
-                    authService.register(signupRequest("buyer1", "new@techzone.test", "password", null));
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-            assertThat(response.getBody().getMessage()).isEqualTo("Error: Username is already taken!");
+            verifyNoInteractions(keycloakAdminClient);
             verify(userRepository, never()).save(any(User.class));
         }
 
         @Test
-        @DisplayName("refuses an email that is already registered")
-        void refusesDuplicateEmail() {
-            when(userRepository.existsByUserName(anyString())).thenReturn(false);
-            when(userRepository.existsByEmail("buyer@techzone.test")).thenReturn(true);
+        @DisplayName("an unknown role name is refused rather than defaulted")
+        void unknownRoleIsRefused() {
+            // The deleted signup path had `case "user": default:` - anything unrecognised
+            // silently became a customer. Refusing is the safer failure: a typo in a role
+            // name is now visible instead of producing an account with the wrong access.
+            assertThatThrownBy(() -> authService.createUser(request("someone@example.com", "ROLE_SUPERUSER")))
+                    .isInstanceOf(APIException.class);
 
-            ResponseEntity<MessageResponse> response =
-                    authService.register(signupRequest("newbuyer", "buyer@techzone.test", "password", null));
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-            assertThat(response.getBody().getMessage()).isEqualTo("Error: Email is already taken!");
-            verify(userRepository, never()).save(any(User.class));
+            verifyNoInteractions(keycloakAdminClient);
         }
 
         @Test
-        @DisplayName("asks the notification service to send a welcome email")
-        void sendsWelcomeEmail() {
-            when(userRepository.existsByUserName(anyString())).thenReturn(false);
-            when(userRepository.existsByEmail(anyString())).thenReturn(false);
-            when(roleRepository.findByRoleName(AppRole.ROLE_USER)).thenReturn(Optional.of(new Role(AppRole.ROLE_USER)));
-
-            authService.register(signupRequest("newbuyer", "new@techzone.test", "password", null));
-
-            verify(notificationProducer).sendRegistrationEmail("new@techzone.test", "newbuyer");
+        @DisplayName("the check is on the normalised value, so case and padding do not slip past it")
+        void roleCheckIsNormalised() {
+            assertThatThrownBy(() -> authService.createUser(request("x@example.com", "  role_admin  ")))
+                    .isInstanceOf(APIException.class)
+                    .hasMessageContaining("ROLE_ADMIN cannot be granted");
         }
 
         @Test
-        @DisplayName("does not send a welcome email when registration is refused")
-        void sendsNoEmailOnRefusal() {
-            when(userRepository.existsByUserName("buyer1")).thenReturn(true);
+        @DisplayName("ROLE_SELLER is granted, in Keycloak and in the local profile, in one operation")
+        void sellerIsCreatedInBothStores() {
+            realmAccepts("seller2@example.com", "f81d4fae-0000-4000-8000-00a0c91e6bf6");
 
-            authService.register(signupRequest("buyer1", "new@techzone.test", "password", null));
+            MessageResponse response = authService.createUser(request("seller2@example.com", "ROLE_SELLER"));
 
-            verify(notificationProducer, never()).sendRegistrationEmail(anyString(), anyString());
+            verify(keycloakAdminClient).assignRealmRole("f81d4fae-0000-4000-8000-00a0c91e6bf6", "ROLE_SELLER");
+
+            ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(saved.capture());
+            assertThat(saved.getValue().getEmail()).isEqualTo("seller2@example.com");
+            assertThat(saved.getValue().getRoles())
+                    .extracting(Role::getRoleName)
+                    .containsExactly(AppRole.ROLE_SELLER);
+
+            // The profile row is written here rather than left to just-in-time provisioning,
+            // so an admin-created seller exists in MySQL before their first sign-in.
+            assertThat(response.getMessage()).contains("seller2@example.com");
+        }
+
+        @Test
+        @DisplayName("ROLE_USER is grantable too")
+        void customerIsGrantable() {
+            realmAccepts("customer@example.com", "f81d4fae-0000-4000-8000-00a0c91e6bf7");
+
+            authService.createUser(request("customer@example.com", "ROLE_USER"));
+
+            verify(keycloakAdminClient).assignRealmRole(anyString(), eq("ROLE_USER"));
         }
     }
 
     @Nested
-    @DisplayName("account deletion guards")
-    class DeletionGuards {
+    @DisplayName("createUser - the temporary password")
+    class TemporaryPassword {
 
         @Test
-        @DisplayName("deletes a plain customer")
-        void deletesCustomer() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(userRepository.findById(4L)).thenReturn(Optional.of(buyer));
+        @DisplayName("the caller does not choose the password; it is generated and returned once")
+        void passwordIsGeneratedNotSupplied() {
+            // CreateUserRequest has no password field at all. Keycloak is told to mark the
+            // one generated here temporary, so the holder must replace it at first login.
+            // Returned in the response rather than emailed: BUG-06 means a failed send is
+            // swallowed, and account creation should not depend on a path that loses errors.
+            realmAccepts("seller3@example.com", "f81d4fae-0000-4000-8000-00a0c91e6bf8");
 
-            MessageResponse response = authService.deleteCustomer(4L);
+            MessageResponse response = authService.createUser(request("seller3@example.com", "ROLE_SELLER"));
 
-            assertThat(response.getMessage()).isEqualTo("Customer deleted successfully");
-            verify(userRepository).delete(buyer);
+            ArgumentCaptor<String> password = ArgumentCaptor.forClass(String.class);
+            verify(keycloakAdminClient).createUser(eq("seller3@example.com"), anyString(), anyString(),
+                    password.capture());
+
+            assertThat(password.getValue()).hasSizeGreaterThanOrEqualTo(8);
+            assertThat(response.getMessage()).contains(password.getValue());
         }
 
         @Test
-        @DisplayName("refuses to delete an account that holds more than the customer role")
-        void refusesToDeletePrivilegedAccountAsCustomer() {
-            User staff = user(5L, "boss", "boss@techzone.test", AppRole.ROLE_USER, AppRole.ROLE_ADMIN);
-            when(userRepository.findById(5L)).thenReturn(Optional.of(staff));
+        @DisplayName("two accounts do not get the same temporary password")
+        void passwordsDiffer() {
+            realmAccepts("a@example.com", "id-a");
+            authService.createUser(request("a@example.com", "ROLE_SELLER"));
 
-            assertThatThrownBy(() -> authService.deleteCustomer(5L))
-                    .isInstanceOf(APIException.class)
-                    .hasMessageContaining("Not a customer or has additional roles");
+            realmAccepts("b@example.com", "id-b");
+            authService.createUser(request("b@example.com", "ROLE_SELLER"));
 
-            verify(userRepository, never()).delete(any(User.class));
-        }
+            ArgumentCaptor<String> passwords = ArgumentCaptor.forClass(String.class);
+            verify(keycloakAdminClient, org.mockito.Mockito.times(2))
+                    .createUser(anyString(), anyString(), anyString(), passwords.capture());
 
-        @Test
-        @DisplayName("deletes a seller")
-        void deletesSeller() {
-            User seller = user(6L, "seller1", "seller@techzone.test", AppRole.ROLE_SELLER);
-            when(userRepository.findById(6L)).thenReturn(Optional.of(seller));
-
-            MessageResponse response = authService.deleteSeller(6L);
-
-            assertThat(response.getMessage()).isEqualTo("Seller deleted successfully");
-            verify(userRepository).delete(seller);
-        }
-
-        @Test
-        @DisplayName("refuses to delete a non-seller through the seller endpoint")
-        void refusesNonSeller() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(userRepository.findById(4L)).thenReturn(Optional.of(buyer));
-
-            assertThatThrownBy(() -> authService.deleteSeller(4L))
-                    .isInstanceOf(APIException.class)
-                    .hasMessageContaining("Not a seller");
-        }
-
-        @Test
-        @DisplayName("refuses to delete a seller who is also an administrator")
-        void refusesSellerWhoIsAdmin() {
-            User staff = user(5L, "boss", "boss@techzone.test", AppRole.ROLE_SELLER, AppRole.ROLE_ADMIN);
-            when(userRepository.findById(5L)).thenReturn(Optional.of(staff));
-
-            assertThatThrownBy(() -> authService.deleteSeller(5L))
-                    .isInstanceOf(APIException.class)
-                    .hasMessageContaining("has admin role");
-
-            verify(userRepository, never()).delete(any(User.class));
-        }
-
-        @Test
-        @DisplayName("fails when the account does not exist")
-        void failsForUnknownAccount() {
-            when(userRepository.findById(404L)).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> authService.deleteCustomer(404L))
-                    .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("User not found with userId: 404");
+            assertThat(passwords.getAllValues()).doesNotHaveDuplicates();
         }
     }
 
     @Nested
-    @DisplayName("verifyCurrentPassword")
-    class VerifyCurrentPassword {
+    @DisplayName("createUser - duplicates")
+    class Duplicates {
 
         @Test
-        @DisplayName("confirms a matching current password without changing anything")
-        void confirmsMatchingPassword() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(authUtil.loggedInUser()).thenReturn(buyer);
-            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
+        @DisplayName("an email that already has a profile is refused before Keycloak is called")
+        void duplicateEmailIsRefused() {
+            when(userRepository.existsByEmail("taken@example.com")).thenReturn(true);
 
-            VerifyPasswordRequest request = new VerifyPasswordRequest();
-            request.setCurrentPassword("correct-password");
+            assertThatThrownBy(() -> authService.createUser(request("taken@example.com", "ROLE_SELLER")))
+                    .isInstanceOf(APIException.class);
 
-            MessageResponse response = authService.verifyCurrentPassword(request);
-
-            assertThat(response.getMessage()).isEqualTo("Password verified");
-            verify(userRepository, never()).save(any(User.class));
+            verifyNoInteractions(keycloakAdminClient);
         }
 
         @Test
-        @DisplayName("refuses a wrong current password")
-        void refusesWrongPassword() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(authUtil.loggedInUser()).thenReturn(buyer);
-            when(passwordEncoder.matches("wrong-password", "hashed-password")).thenReturn(false);
+        @DisplayName("the email is normalised, so Taken@Example.com does not become a second account")
+        void emailIsNormalised() {
+            when(userRepository.existsByEmail("taken@example.com")).thenReturn(true);
 
-            VerifyPasswordRequest request = new VerifyPasswordRequest();
-            request.setCurrentPassword("wrong-password");
-
-            assertThatThrownBy(() -> authService.verifyCurrentPassword(request))
-                    .isInstanceOf(APIException.class)
-                    .hasMessageContaining("Current password is incorrect");
+            assertThatThrownBy(() -> authService.createUser(request("  Taken@Example.com ", "ROLE_SELLER")))
+                    .isInstanceOf(APIException.class);
         }
     }
 
     @Nested
-    @DisplayName("changePassword")
-    class ChangePassword {
+    @DisplayName("deletion removes the account from both stores")
+    class Deletion {
 
-        private ChangePasswordRequest request(String current, String next, String confirm) {
-            ChangePasswordRequest request = new ChangePasswordRequest();
-            request.setCurrentPassword(current);
-            request.setNewPassword(next);
-            request.setConfirmPassword(confirm);
-            return request;
+        @Test
+        @DisplayName("deleting a customer deletes the Keycloak account as well as the profile row")
+        void deleteCustomerRemovesBoth() {
+            // ADR-0012 accepts "two sources of truth about a user" and notes that nothing
+            // reconciles them. This is the one place that cost is paid down rather than
+            // incurred - without it, a deleted customer could still sign in.
+            User customer = new User("gone@example.com", "gone@example.com");
+            customer.setUserId(4L);
+            customer.setRoles(Set.of(new Role(AppRole.ROLE_USER)));
+            when(userRepository.findById(4L)).thenReturn(Optional.of(customer));
+            when(keycloakAdminClient.findUserIdByEmail("gone@example.com")).thenReturn(Optional.of("kc-4"));
+
+            authService.deleteCustomer(4L);
+
+            verify(keycloakAdminClient).deleteUser("kc-4");
+            verify(userRepository).delete(customer);
         }
 
         @Test
-        @DisplayName("hashes and stores the new password, then notifies the user by email")
-        void changesPasswordAndNotifies() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(authUtil.loggedInUser()).thenReturn(buyer);
-            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
-            when(passwordEncoder.matches("new-password", "hashed-password")).thenReturn(false);
-            when(passwordEncoder.encode("new-password")).thenReturn("new-hashed-password");
+        @DisplayName("a seller who is also an administrator is still refused")
+        void adminSellerCannotBeDeleted() {
+            User adminSeller = new User("admin@example.com", "admin@example.com");
+            adminSeller.setUserId(1L);
+            adminSeller.setRoles(Set.of(new Role(AppRole.ROLE_SELLER), new Role(AppRole.ROLE_ADMIN)));
+            when(userRepository.findById(1L)).thenReturn(Optional.of(adminSeller));
 
-            MessageResponse response = authService.changePassword(request("correct-password", "new-password", "new-password"));
+            assertThatThrownBy(() -> authService.deleteSeller(1L)).isInstanceOf(APIException.class);
 
-            assertThat(response.getMessage()).isEqualTo("Password changed successfully");
-            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(captor.capture());
-            assertThat(captor.getValue().getPassword()).isEqualTo("new-hashed-password");
-            verify(notificationProducer).sendPasswordChangedEmail("buyer@techzone.test", "buyer1");
-        }
-
-        @Test
-        @DisplayName("refuses a wrong current password without touching the stored password")
-        void refusesWrongCurrentPassword() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(authUtil.loggedInUser()).thenReturn(buyer);
-            when(passwordEncoder.matches("wrong-password", "hashed-password")).thenReturn(false);
-
-            assertThatThrownBy(() -> authService.changePassword(request("wrong-password", "new-password", "new-password")))
-                    .isInstanceOf(APIException.class)
-                    .hasMessageContaining("Current password is incorrect");
-
-            verify(userRepository, never()).save(any(User.class));
-            verify(notificationProducer, never()).sendPasswordChangedEmail(anyString(), anyString());
-        }
-
-        @Test
-        @DisplayName("refuses when the new password and confirmation do not match")
-        void refusesMismatchedConfirmation() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(authUtil.loggedInUser()).thenReturn(buyer);
-            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
-
-            assertThatThrownBy(() -> authService.changePassword(request("correct-password", "new-password", "different-password")))
-                    .isInstanceOf(APIException.class)
-                    .hasMessageContaining("do not match");
-
-            verify(userRepository, never()).save(any(User.class));
-        }
-
-        @Test
-        @DisplayName("refuses a new password identical to the current one")
-        void refusesSamePassword() {
-            User buyer = user(4L, "buyer1", "buyer@techzone.test", AppRole.ROLE_USER);
-            when(authUtil.loggedInUser()).thenReturn(buyer);
-            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
-            when(passwordEncoder.matches("correct-password", "hashed-password")).thenReturn(true);
-
-            assertThatThrownBy(() -> authService.changePassword(request("correct-password", "correct-password", "correct-password")))
-                    .isInstanceOf(APIException.class)
-                    .hasMessageContaining("must be different");
-
-            verify(userRepository, never()).save(any(User.class));
+            verify(keycloakAdminClient, never()).deleteUser(anyString());
         }
     }
 }

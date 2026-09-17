@@ -17,6 +17,12 @@ import java.util.Optional;
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUserName(String userame);
 
+    /**
+     * The lookup the platform actually keys on since ADR-0012: email is what the access
+     * token carries and what Order, Cart and ProductSnapshot all reference.
+     */
+    Optional<User> findByEmail(String email);
+
 
     boolean existsByEmail(String email);
 

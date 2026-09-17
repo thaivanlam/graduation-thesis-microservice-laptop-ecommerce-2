@@ -2,7 +2,7 @@
 #
 # This file shadows src/main/resources/application.yaml on the test classpath, so
 # the test JVM never contacts the Config Server, Eureka or MySQL. Every value here
-# is throw-away: the JWT secret below signs tokens that only exist inside a test run.
+# is throw-away; no token is signed or verified here (ADR-0012).
 spring:
   application:
     name: product-service
@@ -23,11 +23,17 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
     show-sql: false
-  app:
-    jwtSecret: dGVjaHpvbmUtdGVzdC1vbmx5LWp3dC1zaWduaW5nLXNlY3JldC1ub3QtdXNlZC1pbi1hbnktcmVhbC1lbnYtMDE=
-  ecom:
-    app:
-      jwtCookieName: springBootEcom
+  # ADR-0012: the resource-server auto-configuration needs somewhere to fetch keys
+  # from. Nothing here is ever contacted - every test either builds a Jwt by hand or
+  # uses SecurityMockMvcRequestPostProcessors.jwt(), so the decoder is never asked to
+  # decode anything. The host is RFC 2606 reserved so that a test which does start
+  # reaching out fails loudly rather than talking to something real.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://keycloak.invalid/realms/techzone
+          jwk-set-uri: https://keycloak.invalid/realms/techzone/protocol/openid-connect/certs
 
 eureka:
   client:

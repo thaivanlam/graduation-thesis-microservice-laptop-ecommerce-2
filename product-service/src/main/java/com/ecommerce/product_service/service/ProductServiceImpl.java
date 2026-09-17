@@ -66,7 +66,10 @@ public class ProductServiceImpl implements ProductService {
         product.setCategory(category);
         product.setSpecialPrice(calculateSpecialPrice(product.getPrice(), product.getDiscount()));
         product.setSellerEmail(authUtil.loggedInEmail());
-        product.setSellerId(authUtil.loggedInUserId());
+        // sellerId is deliberately not set: a Keycloak access token carries no numeric user
+        // id, and the local user row that has one lives in another service's database.
+        // sellerEmail is the identity key everything here actually reads. See ADR-0012 and
+        // the note on Product.sellerId.
 
         // Generate SKU automatically
         String sku = SKUGenerator.generateSKU(

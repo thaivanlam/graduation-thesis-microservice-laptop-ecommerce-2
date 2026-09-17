@@ -123,7 +123,6 @@ class ProductServiceImplTest {
             Category laptops = category(1L, "Gaming Laptops");
             when(categoryRepository.findById(1L)).thenReturn(Optional.of(laptops));
             when(authUtil.loggedInEmail()).thenReturn("seller@techzone.test");
-            when(authUtil.loggedInUserId()).thenReturn(9L);
             when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
 
             ProductDTO saved = productService.addProduct(1L, productDto("MSI Katana 15", 1000.0, 10.0, 5, "MSI"));
@@ -136,7 +135,6 @@ class ProductServiceImplTest {
         void zeroDiscountKeepsListPrice() {
             when(categoryRepository.findById(1L)).thenReturn(Optional.of(category(1L, "Gaming Laptops")));
             when(authUtil.loggedInEmail()).thenReturn("seller@techzone.test");
-            when(authUtil.loggedInUserId()).thenReturn(9L);
             when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
 
             ProductDTO saved = productService.addProduct(1L, productDto("MSI Katana 15", 1499.99, 0.0, 5, "MSI"));
@@ -145,11 +143,19 @@ class ProductServiceImplTest {
         }
 
         @Test
-        @DisplayName("stamps the logged-in seller onto the product")
+        @DisplayName("stamps the logged-in seller's email onto the product, and no longer a numeric id")
         void stampsSeller() {
+            // ADR-0012: the caller is now known from a Keycloak access token, which carries
+            // an email and a `sub` UUID but no numeric user id - the local user row that has
+            // one lives in user-service's database and this service cannot see it. sellerId
+            // is therefore left null for anything created after the migration; sellerEmail
+            // is the key every query and every ownership check actually uses.
+            //
+            // Pinned rather than dropped so that a later change which finds a real source
+            // for the id - the identity-key ADR that moves off email, most likely - has to
+            // come back here and say so deliberately.
             when(categoryRepository.findById(1L)).thenReturn(Optional.of(category(1L, "Gaming Laptops")));
             when(authUtil.loggedInEmail()).thenReturn("seller@techzone.test");
-            when(authUtil.loggedInUserId()).thenReturn(9L);
             when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
 
             productService.addProduct(1L, productDto("MSI Katana 15", 1000.0, 10.0, 5, "MSI"));
@@ -157,7 +163,7 @@ class ProductServiceImplTest {
             ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
             verify(productRepository).save(captor.capture());
             assertThat(captor.getValue().getSellerEmail()).isEqualTo("seller@techzone.test");
-            assertThat(captor.getValue().getSellerId()).isEqualTo(9L);
+            assertThat(captor.getValue().getSellerId()).isNull();
         }
 
         @Test
@@ -165,7 +171,6 @@ class ProductServiceImplTest {
         void generatesSku() {
             when(categoryRepository.findById(1L)).thenReturn(Optional.of(category(1L, "Gaming Laptops")));
             when(authUtil.loggedInEmail()).thenReturn("seller@techzone.test");
-            when(authUtil.loggedInUserId()).thenReturn(9L);
             when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
 
             productService.addProduct(1L, productDto("Katana 15", 1000.0, 10.0, 5, "MSI"));
@@ -180,7 +185,6 @@ class ProductServiceImplTest {
         void assignsPlaceholderImage() {
             when(categoryRepository.findById(1L)).thenReturn(Optional.of(category(1L, "Gaming Laptops")));
             when(authUtil.loggedInEmail()).thenReturn("seller@techzone.test");
-            when(authUtil.loggedInUserId()).thenReturn(9L);
             when(productRepository.save(any(Product.class))).thenAnswer(call -> call.getArgument(0));
 
             ProductDTO saved = productService.addProduct(1L, productDto("Katana 15", 1000.0, 10.0, 5, "MSI"));

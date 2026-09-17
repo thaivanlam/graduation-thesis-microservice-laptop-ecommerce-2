@@ -61,7 +61,9 @@ class UserRepositoryIntegrationTest {
     }
 
     private static User user(String userName, String email, Role... roles) {
-        User user = new User(userName, email, "$2a$10$hashedpasswordplaceholder");
+        // No password argument since ADR-0012: the table is a profile and the owner of
+        // Address rows, not a credential store. There is no hash here to place.
+        User user = new User(userName, email);
         user.setRoles(new LinkedHashSet<>(Set.of(roles)));
         return user;
     }

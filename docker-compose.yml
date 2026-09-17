@@ -48,6 +48,74 @@ services:
       retries: 5
 
   # =====================
+  # IDENTITY PROVIDER (ADR-0012)
+  # =====================
+  # Deliberately NOT behind a compose profile. Since ADR-0012 the platform
+  # issues no tokens of its own, so nobody can sign in to any mode — including
+  # the hybrid Mode 3, where the services run from an IDE — unless Keycloak is
+  # up. It belongs with mysql and rabbitmq, not with the business services.
+  #
+  # `start-dev` is correct for this project and wrong for a published one: it
+  # disables HTTPS enforcement and strict hostname checks. Risk 6 in
+  # docs/architecture/keycloak-migration-plan.md — the admin console must not
+  # be published on a host port outside a development laptop.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # Bootstrap console account. Names the variables, never the values —
+      # the defaults below are development-only, as with Grafana above.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Its own logical database in the existing instance, per ADR-0008.
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://mysql:3306/keycloak?createDatabaseIfNotExist=true&characterEncoding=UTF-8
+      KC_DB_USERNAME: root
+      KC_DB_PASSWORD: root
+      KC_HTTP_PORT: 8090
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      # Pins the `iss` claim to the address the BROWSER used, whichever host name
+      # a given request arrived on. Without it the issuer follows the request, so
+      # a token fetched by the SPA via localhost and a JWKS fetched by a service
+      # via the container name disagree, and every service answers 401. The
+      # services are configured with this same value as issuer-uri; they fetch
+      # keys from KEYCLOAK_JWK_SET_URI instead, which is the reachable one.
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8090}
+      # …while letting server-to-server callers keep using http://keycloak:8090.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # Substituted into realm-techzone.json at import time. The realm file
+      # carries the variable name and a development default, never a real
+      # secret — same pattern as STRIPE_SECRET_KEY and MAIL_PASSWORD.
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-techzone-admin-api-dev-secret}
+      KEYCLOAK_TESTS_CLIENT_SECRET: ${KEYCLOAK_TESTS_CLIENT_SECRET:-techzone-tests-dev-secret}
+    ports:
+      - "${KEYCLOAK_PORT:-8090}:8090"
+    volumes:
+      # --import-realm reads every file in this directory on start. The import
+      # is skipped for a realm that already exists, so editing this file has no
+      # effect on a stack whose keycloak database is already populated — see
+      # docs/operations/running-locally.md.
+      - ./keycloak/realm-techzone.json:/opt/keycloak/data/import/realm-techzone.json:ro
+    networks:
+      - ecommerce-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # The image ships neither curl nor wget. Talk to the management port with
+    # bash's /dev/tcp instead: /health/ready reports UP only once the realm
+    # import has finished, which an open TCP port would not prove.
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # =====================
   # DEMO DATA SEEDER
   # =====================
   # One-shot container, opt-in through the `seed` profile:
@@ -129,6 +197,15 @@ services:
       SPRING_CONFIG_IMPORT: configserver:http://config-server:8888
       CONFIG_SERVER_URL: http://config-server:8888
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8090/realms/techzone}
+      KEYCLOAK_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8090/realms/techzone/protocol/openid-connect/certs}
+      # user-service alone also calls the Admin API, server to server, to create
+      # and delete accounts. KEYCLOAK_BASE_URL is therefore the reachable
+      # address, and the secret comes from the environment - never committed.
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://keycloak:8090}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-techzone}
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-techzone-admin-api}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-techzone-admin-api-dev-secret}
     networks:
       - ecommerce-network
     depends_on:
@@ -141,6 +218,8 @@ services:
       config-server:
         condition: service_healthy
       api-gateway:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
 
   product-service:
@@ -155,6 +234,8 @@ services:
       CONFIG_SERVER_URL: http://config-server:8888
       IMAGE_BASE_URL: ${IMAGE_BASE_URL:-http://localhost:8080/product-manager/images}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8090/realms/techzone}
+      KEYCLOAK_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8090/realms/techzone/protocol/openid-connect/certs}
     networks:
       - ecommerce-network
     depends_on:
@@ -165,6 +246,8 @@ services:
       config-server:
         condition: service_healthy
       api-gateway:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
 
   order-service:
@@ -179,6 +262,8 @@ services:
       CONFIG_SERVER_URL: http://config-server:8888
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8090/realms/techzone}
+      KEYCLOAK_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8090/realms/techzone/protocol/openid-connect/certs}
     networks:
       - ecommerce-network
     depends_on:
@@ -191,6 +276,8 @@ services:
       config-server:
         condition: service_healthy
       api-gateway:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
 
   notification-service:
@@ -229,10 +316,17 @@ services:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka/
       EUREKA_SERVER_URL: http://discovery-service:8761
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8090/realms/techzone}
+      KEYCLOAK_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8090/realms/techzone/protocol/openid-connect/certs}
     networks:
       - ecommerce-network
     depends_on:
       discovery-service:
+        condition: service_healthy
+      # spring.security.oauth2.resourceserver.jwt.issuer-uri performs OIDC
+      # discovery during startup, so the realm has to answer before the
+      # resource-server filter chain can be built (ADR-0012).
+      keycloak:
         condition: service_healthy
     # The runtime image ships neither curl nor wget, so probe the listening
     # port rather than /actuator/health.

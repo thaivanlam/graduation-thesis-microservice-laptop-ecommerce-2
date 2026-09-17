@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -39,6 +40,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code @RestControllerAdvice} that turns domain exceptions into HTTP responses. Those
  * are the pieces a unit test of the service can never cover.</p>
  */
+// ADR-0012 made this service an OIDC resource server, so @WebMvcTest now loads the
+// SecurityFilterChain too and every request below would answer 401 or 403. The filters are
+// switched off here on purpose: what this class covers is the web contract - URL mapping,
+// query-parameter binding and defaulting, JSON serialisation, and the @RestControllerAdvice
+// that turns domain exceptions into HTTP responses. Who may call these paths is a separate
+// question with its own test, {@code ProductServiceSecurityTest} , which asserts it against the real chain.
+@AutoConfigureMockMvc(addFilters = false)
 @WebMvcTest(ProductController.class)
 @DisplayName("Integration - ProductController HTTP contract")
 class ProductControllerIntegrationTest {

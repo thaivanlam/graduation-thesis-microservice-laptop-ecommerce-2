@@ -1,31 +1,35 @@
 package com.ecommerce.order_service.util;
 
-
 import com.ecommerce.order_service.exceptions.APIException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
-import com.ecommerce.order_service.security.JwtService;
-import io.jsonwebtoken.Claims;
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.web.context.request.RequestAttributes;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
+/**
+ * Who is calling, according to the access token Spring Security has already verified.
+ *
+ * <p>Before ADR-0012 this class read a cookie off the current request, verified an HS256
+ * signature with a shared secret and parsed the claims itself — four such validators
+ * existed across the platform, and BUG-19 was a missing catch clause in all four. It now
+ * reads the {@link Jwt} that the resource-server filter chain put in the
+ * {@link SecurityContextHolder}: by the time any of this runs the signature, the issuer and
+ * the expiry have been checked against the realm's JWKS.</p>
+ *
+ * <p>The method keeps its signature, so the call sites in {@code CartServiceImpl},
+ * {@code OrderServiceImpl} and {@code OrderController} did not change. What it returns is
+ * still the email, because {@code Cart.userEmail}, {@code Order.email} and
+ * {@code ProductSnapshot.sellerEmail} are all keyed on it.</p>
+ */
 @Component
 public class AuthUtil {
 
-    private static final String JWT_CLAIMS_ATTRIBUTE = "ORDER_SERVICE_JWT_CLAIMS";
-
-    private final JwtService jwtService;
-
-    public AuthUtil(JwtService jwtService) {
-        this.jwtService = jwtService;
-    }
-
     public String loggedInEmail() {
-        Claims claims = currentClaims();
-        String email = jwtService.extractEmail(claims);
+        Jwt token = currentToken();
+        String email = token.getClaimAsString("email");
         if (email == null || email.isBlank()) {
-            email = jwtService.extractUsername(claims);
+            email = token.getClaimAsString("preferred_username");
         }
         if (email == null || email.isBlank()) {
             throw new APIException("Missing authenticated user email");
@@ -33,31 +37,11 @@ public class AuthUtil {
         return email;
     }
 
-    private Claims currentClaims() {
-        HttpServletRequest request = currentRequest();
-        Object cachedClaims = request.getAttribute(JWT_CLAIMS_ATTRIBUTE);
-        if (cachedClaims instanceof Claims claims) {
-            return claims;
-        }
-
-        String token = jwtService.resolveToken(request);
-        if (token == null || token.isBlank()) {
+    private Jwt currentToken() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)) {
             throw new APIException("Missing authentication token");
         }
-        if (!jwtService.isTokenValid(token)) {
-            throw new APIException("Invalid or expired authentication token");
-        }
-
-        Claims claims = jwtService.parseClaims(token);
-        request.setAttribute(JWT_CLAIMS_ATTRIBUTE, claims);
-        return claims;
-    }
-
-    private HttpServletRequest currentRequest() {
-        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
-        if (!(attributes instanceof ServletRequestAttributes servletAttributes)) {
-            throw new APIException("No active request context");
-        }
-        return servletAttributes.getRequest();
+        return jwtAuthentication.getToken();
     }
 }

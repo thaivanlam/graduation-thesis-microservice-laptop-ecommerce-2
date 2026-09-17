@@ -1,4 +1,4 @@
-package com.ecommerce.user_service.security;
+package com.ecommerce.order_service.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,23 +11,22 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * user-service as an OIDC resource server (ADR-0012).
+ * order-service as an OIDC resource server (ADR-0012).
  *
- * <p>Before this change the class permitted everything — {@code anyRequest().permitAll()} —
- * because the gateway was the only thing checking anything and this service minted the
- * tokens it checked. Both halves of that are gone: it issues no tokens, and it no longer
- * takes the gateway's word for who is calling.</p>
+ * <p>The service validates the caller's token itself rather than taking the gateway's word
+ * for it — SEC-10 records that these container ports are published on the host, so "it came
+ * through the gateway" is not a property any service here can rely on.</p>
  *
- * <p><strong>SEC-02 is closed here.</strong> {@code getSellers}, {@code getCustomers},
- * {@code deleteCustomer} and {@code deleteSeller} used to sit under {@code /api/auth/**},
- * which the gateway declares public, so they were reachable by anyone who could reach the
- * port. They now live under {@code /api/admin/users/**}, which the rule below and the
- * gateway's matching rule both restrict to {@code ROLE_ADMIN}.</p>
+ * <p>The rules mirror {@code gateway.security} in api-gateway/src/main/resources/application.yaml
+ * with the routing prefix stripped. Note that {@code /api/seller/**} accepts an
+ * administrator as well as a seller, matching the gateway's mapping for the same paths;
+ * the equivalent product-service rule does not, and that asymmetry predates this change.</p>
  *
- * <p>{@code /api/auth/**} stays public because what is left under it —
- * {@code /api/auth/user} and {@code /api/auth/username} — reads the caller's own token; a
- * request without one gets a 401 from the handler rather than being refused here. Sign-in,
- * sign-up and sign-out are not there at all any more: they are Keycloak's.</p>
+ * <p>Nothing here decides whether the caller <em>owns</em> the cart or order they are
+ * touching. SEC-07 (every user's cart is returned), SEC-08 (any authenticated account can
+ * change an order's status) and SEC-09 (address update and delete verify no ownership) are
+ * missing checks in business code, and Keycloak has no view of them. They survive this
+ * migration unchanged and are listed as such in ADR-0012.</p>
  */
 @Configuration
 @EnableWebSecurity
@@ -41,14 +40,15 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
-                                "/api/auth/**",
                                 "/api/public/**",
+                                "/api/internal/**",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/actuator/**")
                         .permitAll()
                         .requestMatchers("/api/admin/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/seller/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_SELLER")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))

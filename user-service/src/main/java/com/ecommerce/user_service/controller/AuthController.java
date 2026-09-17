@@ -1,22 +1,35 @@
 package com.ecommerce.user_service.controller;
 
-import com.ecommerce.user_service.config.AppConstants;
-import com.ecommerce.user_service.payload.AuthenticationResult;
 import com.ecommerce.user_service.service.AuthService;
-import jakarta.servlet.http.HttpServletRequest;
-import com.ecommerce.user_service.security.request.LoginRequest;
-import com.ecommerce.user_service.security.request.SignupRequest;
-import com.ecommerce.user_service.security.response.MessageResponse;
-import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * What is left under {@code /api/auth} after ADR-0012: two reads of the caller's own
+ * profile, backed by the access token they already hold.
+ *
+ * <p>Deliberately absent:</p>
+ *
+ * <ul>
+ *   <li>{@code POST /signin} — the SPA gets a token from Keycloak by Authorization Code +
+ *       PKCE. Nothing here verifies a password, because nothing here stores one.</li>
+ *   <li>{@code POST /signup} — registration is Keycloak's page. This is where SEC-01 lived:
+ *       the payload carried {@code roles} and {@code "admin"} mapped onto
+ *       {@code ROLE_ADMIN}. The fix is not that the field is now validated more carefully,
+ *       it is that there is no field, and no endpoint. A self-registering user receives the
+ *       realm's default role, {@code ROLE_USER}, and cannot ask for more.</li>
+ *   <li>{@code POST /signout} — there is no cookie to clear. The SPA calls Keycloak's
+ *       end-session endpoint, which actually revokes the session rather than dropping a
+ *       client-side credential on the floor (part of SEC-13).</li>
+ *   <li>{@code GET /sellers}, {@code GET /customers}, {@code DELETE /customers/{id}},
+ *       {@code DELETE /sellers/{id}} — these were administrative operations sitting under a
+ *       prefix the gateway declares public, reachable by anyone: SEC-02. They moved to
+ *       {@link AdminUserController} at {@code /api/admin/users}, behind {@code ROLE_ADMIN}.</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -24,65 +37,13 @@ public class AuthController {
     @Autowired
     private AuthService authService;
 
-    @PostMapping("/signin")
-    public ResponseEntity<?> authenticateUser(@RequestBody LoginRequest loginRequest) {
-        AuthenticationResult result = authService.login(loginRequest);
-
-        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, result.getJwtCookie().toString())
-                .body(result.getResponse());
-    }
-
-    @PostMapping("/signup")
-    public ResponseEntity<?> registerUser(@Valid @RequestBody SignupRequest signupRequest) {
-        return authService.register(signupRequest);
-    }
-
     @GetMapping("/username")
-    public ResponseEntity<?> currentUserName(HttpServletRequest httpServletRequest) {
-        return ResponseEntity.ok(authService.getUsername(httpServletRequest));
+    public ResponseEntity<?> currentUserName() {
+        return ResponseEntity.ok(authService.getUsername());
     }
 
     @GetMapping("/user")
-    public ResponseEntity<?> getUserDetails(HttpServletRequest httpServletRequest) {
-        return ResponseEntity.ok(authService.getCurrentUserDetails(httpServletRequest));
-    }
-
-    @PostMapping("/signout")
-    public ResponseEntity<?> signoutUser() {
-        ResponseCookie cookie = authService.logoutUser();
-        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(new MessageResponse("You've been signed out!"));
-    }
-
-    @GetMapping("/sellers")
-    public ResponseEntity<?> getAllSellers(
-            @RequestParam(name = "pageNumber", defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber) {
-
-        Sort sortByAndOrder = Sort.by(AppConstants.SORT_USERS_BY).descending();
-        Pageable pageDetails = PageRequest.of(pageNumber,
-                Integer.parseInt(AppConstants.PAGE_SIZE), sortByAndOrder);
-
-        return ResponseEntity.ok(authService.getAllSellers(pageDetails));
-    }
-
-    @GetMapping("/customers")
-    public ResponseEntity<?> getAllCustomers(
-            @RequestParam(name = "pageNumber", defaultValue = AppConstants.PAGE_NUMBER, required = false) Integer pageNumber) {
-
-        Sort sortByAndOrder = Sort.by(AppConstants.SORT_USERS_BY).descending();
-        Pageable pageDetails = PageRequest.of(pageNumber,
-                Integer.parseInt(AppConstants.PAGE_SIZE), sortByAndOrder);
-
-        return ResponseEntity.ok(authService.getAllCustomers(pageDetails));
-    }
-
-    @DeleteMapping("/customers/{userId}")
-    public ResponseEntity<?> deleteCustomer(@PathVariable Long userId) {
-        return ResponseEntity.ok(authService.deleteCustomer(userId));
-    }
-
-    @DeleteMapping("/sellers/{userId}")
-    public ResponseEntity<?> deleteSeller(@PathVariable Long userId) {
-        return ResponseEntity.ok(authService.deleteSeller(userId));
+    public ResponseEntity<?> getUserDetails() {
+        return ResponseEntity.ok(authService.getCurrentUserDetails());
     }
 }

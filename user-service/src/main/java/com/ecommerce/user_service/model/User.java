@@ -25,8 +25,14 @@ public class User {
     @Column(name = "user_id")
     private Long userId;
 
+    /**
+     * The {@code preferred_username} claim. Since ADR-0012 the realm is configured
+     * email-as-username, so for accounts created after the migration this holds an email
+     * address — hence 50 rather than the 20 it was sized at when usernames were chosen on a
+     * sign-up form this service owned.
+     */
     @NotBlank
-    @Size(max = 20)
+    @Size(max = 50)
     @Column(name = "username")
     private String userName;
 
@@ -36,15 +42,13 @@ public class User {
     @Column(name = "email")
     private String email;
 
-    @NotBlank
-    @Size(max = 120)
-    @Column(name = "password")
-    private String password;
+    // No password column. ADR-0012 moved credentials to Keycloak: this table is a profile
+    // and the owner of Address rows, not a credential store. Nothing here verifies anybody,
+    // and there is no hash to leak.
 
-    public User(String userName, String email, String password) {
+    public User(String userName, String email) {
         this.userName = userName;
         this.email = email;
-        this.password = password;
     }
 
     @ManyToMany(cascade = {CascadeType.MERGE}, fetch = FetchType.EAGER)

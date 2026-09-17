@@ -16,7 +16,9 @@ public class UserDTO {
     private Long userId;
     private String username;
     private String email;
-    private String password;
+    // No password field since ADR-0012. The admin seller and customer lists used to map
+    // User straight onto this DTO, so they returned every account's BCrypt hash. There is
+    // no hash to return now, and no field for one to reappear in.
     private Set<Role> roles = new HashSet<>();
 
 }

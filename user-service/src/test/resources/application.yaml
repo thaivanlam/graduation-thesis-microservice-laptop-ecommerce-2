@@ -18,12 +18,17 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
-  app:
-    jwtSecret: dGVjaHpvbmUtdGVzdC1vbmx5LWp3dC1zaWduaW5nLXNlY3JldC1ub3QtdXNlZC1pbi1hbnktcmVhbC1lbnYtMDE=
-    jwtExpirationMs: 3600000
-  ecom:
-    app:
-      jwtCookieName: springBootEcom
+  # ADR-0012: the resource-server auto-configuration needs somewhere to fetch keys
+  # from. Nothing here is ever contacted - every test either builds a Jwt by hand or
+  # uses SecurityMockMvcRequestPostProcessors.jwt(). The host is RFC 2606 reserved so
+  # that a test which does start reaching out fails loudly rather than talking to
+  # something real.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://keycloak.invalid/realms/techzone
+          jwk-set-uri: https://keycloak.invalid/realms/techzone/protocol/openid-connect/certs
 
 eureka:
   client:
@@ -36,3 +41,13 @@ queue:
     queue: notification-queue
     exchange: notification-exchange
     routing-key: notification-routing-key
+
+# Same idea for the Admin API client: KeycloakAdminClient is a mock in every test, so
+# this base URL is never dialled. The secret is empty on purpose - a test must never
+# depend on a real one being present.
+techzone:
+  keycloak:
+    base-url: https://keycloak.invalid
+    realm: techzone
+    admin-client-id: techzone-admin-api
+    admin-client-secret: ""

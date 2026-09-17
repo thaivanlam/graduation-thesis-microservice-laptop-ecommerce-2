@@ -28,13 +28,7 @@ public class NotificationProducer {
         rabbitTemplate.convertAndSend(notificationExchange, notificationRoutingKey, notificationEmail);
     }
 
-    public void sendPasswordChangedEmail(String email, String username) {
-        NotificationEmail notificationEmail = NotificationEmail.builder()
-                .recipient(email)
-                .subject("Your password has been changed")
-                .msgBody("Hi " + username + ", your account password was just changed. If you did not make this change, please contact support immediately.")
-                .build();
-
-        rabbitTemplate.convertAndSend(notificationExchange, notificationRoutingKey, notificationEmail);
-    }
+    // sendPasswordChangedEmail was removed with ADR-0012. Passwords are changed in Keycloak's
+    // account console, which this service never hears about; Keycloak's own SMTP settings
+    // are where a "password changed" notice belongs now.
 }

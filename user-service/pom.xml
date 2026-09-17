@@ -47,26 +47,18 @@
 <!--            <groupId>org.springframework.security</groupId>-->
 <!--            <artifactId>spring-security-crypto</artifactId>-->
 <!--        </dependency>-->
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-api</artifactId>
-            <version>0.13.0</version>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-impl</artifactId>
-            <version>0.13.0</version>
-            <scope>runtime</scope>
-        </dependency>
+        <!-- ADR-0012: this service issues no tokens and stores no credentials. It
+             validates Keycloak RS256 access tokens against the realm JWKS like any
+             other service, and reaches Keycloak's Admin API with a service account.
+             Replaces the three jjwt dependencies and JwtUtils, which minted and
+             verified the platform's own HS256 tokens.
+
+             spring-boot-starter-security is pulled in transitively; it is no longer
+             declared separately because nothing here needs it on its own. BCrypt goes
+             with it: passwords are Keycloak's. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-jackson</artifactId> <!-- or jjwt-gson if Gson is preferred -->
-            <version>0.13.0</version>
-            <scope>runtime</scope>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
         </dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -102,6 +94,11 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-config</artifactId>

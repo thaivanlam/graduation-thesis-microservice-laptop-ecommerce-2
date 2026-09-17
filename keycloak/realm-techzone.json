@@ -1,0 +1,216 @@
+{
+  "realm": "techzone",
+  "displayName": "TechZone",
+  "enabled": true,
+  "sslRequired": "external",
+
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "verifyEmail": false,
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+
+  "bruteForceProtected": true,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+
+  "passwordPolicy": "length(8) and notUsername(undefined)",
+
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_USER",
+        "description": "Customer. The realm default role — assigned automatically, never requestable.",
+        "composite": false
+      },
+      {
+        "name": "ROLE_SELLER",
+        "description": "Seller. Composite: includes ROLE_USER.",
+        "composite": true,
+        "composites": {
+          "realm": ["ROLE_USER"]
+        }
+      },
+      {
+        "name": "ROLE_ADMIN",
+        "description": "Administrator. Composite: includes ROLE_SELLER, and through it ROLE_USER.",
+        "composite": true,
+        "composites": {
+          "realm": ["ROLE_SELLER"]
+        }
+      },
+      {
+        "name": "offline_access",
+        "description": "Built-in. Declared here because a composite cannot reference a role the import has not created yet.",
+        "composite": false
+      },
+      {
+        "name": "uma_authorization",
+        "description": "Built-in. Declared here for the same reason as offline_access.",
+        "composite": false
+      },
+      {
+        "name": "default-roles-techzone",
+        "description": "Assigned to every new account. Carries ROLE_USER, which is what closes SEC-01.",
+        "composite": true,
+        "composites": {
+          "realm": ["ROLE_USER", "offline_access", "uma_authorization"],
+          "client": {
+            "account": ["view-profile", "manage-account"]
+          }
+        }
+      }
+    ]
+  },
+
+  "defaultRole": {
+    "name": "default-roles-techzone",
+    "description": "Assigned to every new account.",
+    "composite": true,
+    "clientRole": false,
+    "containerId": "techzone"
+  },
+
+  "clients": [
+    {
+      "clientId": "techzone-spa",
+      "name": "TechZone storefront",
+      "description": "The React SPA. Public client: a browser bundle cannot hold a secret, so PKCE replaces one.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:3000/*"
+      },
+      "defaultClientScopes": ["acr", "basic", "email", "profile", "roles", "web-origins"],
+      "optionalClientScopes": ["address", "phone", "offline_access"]
+    },
+    {
+      "clientId": "techzone-admin-api",
+      "name": "TechZone user administration",
+      "description": "Service account used by user-service to reach the Keycloak Admin API. Confidential; the secret comes from KEYCLOAK_ADMIN_CLIENT_SECRET.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "secret": "${KEYCLOAK_ADMIN_CLIENT_SECRET:techzone-admin-api-dev-secret}",
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": ["acr", "basic", "email", "profile", "roles", "web-origins"]
+    },
+    {
+      "clientId": "techzone-tests",
+      "name": "TechZone automated tests",
+      "description": "Exists only so the system, acceptance and load suites can obtain a token by password grant instead of driving a browser. Dev realm only — do not enable in a published environment.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "secret": "${KEYCLOAK_TESTS_CLIENT_SECRET:techzone-tests-dev-secret}",
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": ["acr", "basic", "email", "profile", "roles", "web-origins"]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "service-account-techzone-admin-api",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "techzone-admin-api",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users"]
+      }
+    },
+    {
+      "username": "user1@example.com",
+      "email": "user1@example.com",
+      "firstName": "Demo",
+      "lastName": "Customer One",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "password1", "temporary": false }
+      ],
+      "realmRoles": ["default-roles-techzone"]
+    },
+    {
+      "username": "user2@example.com",
+      "email": "user2@example.com",
+      "firstName": "Demo",
+      "lastName": "Customer Two",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "password1", "temporary": false }
+      ],
+      "realmRoles": ["default-roles-techzone"]
+    },
+    {
+      "username": "seller1@example.com",
+      "email": "seller1@example.com",
+      "firstName": "Demo",
+      "lastName": "Seller One",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "password2", "temporary": false }
+      ],
+      "realmRoles": ["default-roles-techzone", "ROLE_SELLER"]
+    },
+    {
+      "username": "admin@example.com",
+      "email": "admin@example.com",
+      "firstName": "Demo",
+      "lastName": "Administrator",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "adminPass", "temporary": false }
+      ],
+      "realmRoles": ["default-roles-techzone", "ROLE_ADMIN"]
+    }
+  ],
+
+  "smtpServer": {},
+  "eventsEnabled": true,
+  "eventsExpiration": 86400,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+  "internationalizationEnabled": false
+}

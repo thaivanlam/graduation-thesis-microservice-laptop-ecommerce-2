@@ -3,12 +3,26 @@ spring:
     hibernate:
       ddl-auto: update
 
-  app:
-    jwtSecret: mySecretKey123912738fsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfgfdhrher
-    jwtExpirationMs: 3000000
-  ecom:
-    app:
-      jwtCookieName: springBootEcom
+  # -------------------------------------------------------------------
+  # ADR-0012 — Keycloak as the identity provider
+  # -------------------------------------------------------------------
+  # This service is an OIDC resource server. It verifies RS256 access tokens
+  # locally against the realm's cached JWKS and holds no signing key of its own,
+  # which is what closes SEC-04: the shared HMAC secret that used to sit here
+  # let any service that could validate a token also mint one.
+  #
+  # Two URLs, not one, and the distinction is load-bearing. `iss` in the token is
+  # whatever host the browser used to obtain it, so issuer-uri must be the PUBLIC
+  # address and is only ever compared, never fetched. jwk-set-uri is the address
+  # this container can actually reach, and is the one called. Setting both also
+  # skips OIDC discovery, so the service starts even if Keycloak is still coming
+  # up. See docs/operations/configuration-reference.md.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8090/realms/techzone}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8090/realms/techzone/protocol/openid-connect/certs}
 
   servlet:
     multipart:

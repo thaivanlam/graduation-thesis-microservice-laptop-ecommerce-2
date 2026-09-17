@@ -3,12 +3,23 @@ spring:
     hibernate:
       ddl-auto: update
 
-  app:
-    jwtSecret: mySecretKey123912738fsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfgfdhrher
-    jwtExpirationMs: 3000000
-  ecom:
-    app:
-      jwtCookieName: springBootEcom
+  # -------------------------------------------------------------------
+  # ADR-0012 — Keycloak as the identity provider
+  # -------------------------------------------------------------------
+  # This service issues no tokens. It validates them like any other resource
+  # server, against the realm's cached JWKS, and holds no signing key — which is
+  # what closes SEC-04: the shared HMAC secret that used to sit here let any
+  # service that could validate a token also mint one.
+  #
+  # issuer-uri is the PUBLIC address and is only ever compared against the `iss`
+  # claim; jwk-set-uri is the address this container can reach, and is the one
+  # actually called. See docs/operations/configuration-reference.md.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8090/realms/techzone}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8090/realms/techzone/protocol/openid-connect/certs}
 
 server:
   port: 8082
@@ -50,3 +61,22 @@ management:
         http.server.requests: true
       slo:
         http.server.requests: 100ms,200ms,500ms,1s,2s
+
+# ---------------------------------------------------------------------
+# Keycloak Admin API — used by POST/GET/DELETE /api/admin/users
+# ---------------------------------------------------------------------
+# base-url is reached server-to-server, so inside Docker it is the container
+# name, not the address a browser uses.
+#
+# admin-client-secret NAMES the variable and never holds a value: it comes from
+# the environment as KEYCLOAK_ADMIN_CLIENT_SECRET, the same way STRIPE_SECRET_KEY
+# and MAIL_PASSWORD already do. The service account it belongs to holds
+# manage-users, view-users and query-users on realm-management and nothing else —
+# notably not manage-realm, so nothing reachable from this service can alter the
+# realm's roles or clients.
+techzone:
+  keycloak:
+    base-url: ${KEYCLOAK_BASE_URL:http://localhost:8090}
+    realm: ${KEYCLOAK_REALM:techzone}
+    admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:techzone-admin-api}
+    admin-client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:}

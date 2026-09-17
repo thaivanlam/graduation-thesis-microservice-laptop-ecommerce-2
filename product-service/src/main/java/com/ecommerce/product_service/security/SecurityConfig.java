@@ -1,4 +1,4 @@
-package com.ecommerce.user_service.security;
+package com.ecommerce.product_service.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,23 +11,29 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * user-service as an OIDC resource server (ADR-0012).
+ * product-service as an OIDC resource server (ADR-0012).
  *
- * <p>Before this change the class permitted everything — {@code anyRequest().permitAll()} —
- * because the gateway was the only thing checking anything and this service minted the
- * tokens it checked. Both halves of that are gone: it issues no tokens, and it no longer
- * takes the gateway's word for who is calling.</p>
+ * <p>The service validates the caller's token itself rather than taking the gateway's word
+ * for it. That is deliberate, not belt-and-braces: SEC-10 records that these container
+ * ports are published on the host, so "it came through the gateway" is not a property any
+ * service here can rely on.</p>
  *
- * <p><strong>SEC-02 is closed here.</strong> {@code getSellers}, {@code getCustomers},
- * {@code deleteCustomer} and {@code deleteSeller} used to sit under {@code /api/auth/**},
- * which the gateway declares public, so they were reachable by anyone who could reach the
- * port. They now live under {@code /api/admin/users/**}, which the rule below and the
- * gateway's matching rule both restrict to {@code ROLE_ADMIN}.</p>
+ * <p>The rules mirror {@code gateway.security} in api-gateway/src/main/resources/application.yaml
+ * with the routing prefix stripped, because that is the same policy seen from one hop
+ * further in. Two paths are permitted that a reader should not mistake for oversights:</p>
  *
- * <p>{@code /api/auth/**} stays public because what is left under it —
- * {@code /api/auth/user} and {@code /api/auth/username} — reads the caller's own token; a
- * request without one gets a 401 from the handler rather than being refused here. Sign-in,
- * sign-up and sign-out are not there at all any more: they are Keycloak's.</p>
+ * <ul>
+ *   <li>{@code /api/internal/**} — order-service calls it directly, without a token, to read
+ *       stock and decrement it. This is <strong>SEC-10</strong>, and ADR-0012 explicitly does
+ *       not close it: Keycloak authenticates a caller, it has no view of which callers a
+ *       route should have. Closing it needs its own decision about service-to-service
+ *       credentials.</li>
+ *   <li>{@code /actuator/**} — Prometheus scrapes it on the container network.</li>
+ * </ul>
+ *
+ * <p>Nothing here decides whether the caller <em>owns</em> the product they are editing.
+ * SEC-05's ownership half is untouched by this migration and remains to be written in
+ * {@code ProductServiceImpl}.</p>
  */
 @Configuration
 @EnableWebSecurity
@@ -38,17 +44,20 @@ public class SecurityConfig {
         return httpSecurity
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
+                // Bearer tokens carry their own state; there is no session to keep.
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
-                                "/api/auth/**",
                                 "/api/public/**",
+                                "/api/internal/**",
+                                "/images/**",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/actuator/**")
                         .permitAll()
                         .requestMatchers("/api/admin/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/seller/**").hasAuthority("ROLE_SELLER")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
@@ -61,6 +70,8 @@ public class SecurityConfig {
     public JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
+        // Email is the platform's identity key: Product.sellerEmail, Cart.userEmail and
+        // Order.email are all keyed on it, so it is what AuthUtil.loggedInEmail() returns.
         converter.setPrincipalClaimName("email");
         return converter;
     }

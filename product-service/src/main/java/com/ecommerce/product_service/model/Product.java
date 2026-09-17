@@ -30,6 +30,16 @@ public class Product {
     private double discount;
     private double specialPrice;
 
+    /**
+     * Historic. Populated by the seed data and by products created before ADR-0012; null
+     * for anything created since, because an OIDC access token has no numeric user id and
+     * the local user row that does have one belongs to user-service's database.
+     *
+     * <p>Nothing reads it — {@code sellerEmail} below is the key every query and every
+     * ownership comparison uses. It is kept so that seeded rows and the DTO contract are
+     * unchanged, and it should be dropped by whichever ADR finally moves the identity key
+     * off email and onto {@code sub}.</p>
+     */
     private Long sellerId;
 
     private String sellerEmail;

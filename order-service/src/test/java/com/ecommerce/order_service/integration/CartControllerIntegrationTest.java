@@ -9,6 +9,7 @@ import com.ecommerce.order_service.service.CartService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -32,6 +33,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Integration tests for the cart web layer: routing, path-variable binding, JSON shape and
  * the exception advice. The cart service itself is stubbed.
  */
+// ADR-0012 made this service an OIDC resource server, so @WebMvcTest now loads the
+// SecurityFilterChain too and every request below would answer 401 or 403. The filters are
+// switched off here on purpose: what this class covers is the web contract - URL mapping,
+// query-parameter binding and defaulting, JSON serialisation, and the @RestControllerAdvice
+// that turns domain exceptions into HTTP responses. Who may call these paths is a separate
+// question with its own test, {@code OrderServiceSecurityTest} , which asserts it against the real chain.
+@AutoConfigureMockMvc(addFilters = false)
 @WebMvcTest(CartController.class)
 @DisplayName("Integration - CartController HTTP contract")
 class CartControllerIntegrationTest {
