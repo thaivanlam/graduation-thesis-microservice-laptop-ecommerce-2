@@ -1,0 +1,97 @@
+# =====================================================================
+# Resource overlay — DEVELOPMENT (small footprint)
+#
+# Layered on top of docker-compose.yml; it changes nothing but the JVM flags
+# and the memory/CPU ceilings of the seven Spring Boot containers.
+#
+#   # from backend/
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+#   # from the repository root (full stack)
+#   docker compose -f docker-compose.yml -f backend/docker-compose.dev.yml up -d
+#
+# Without an overlay the base file is unchanged: no limits, and every JVM
+# sizes itself from the whole Docker VM (a quarter of its RAM as max heap,
+# G1, one GC thread per core).
+#
+# Tuned for everyday development and functional testing, NOT for measuring:
+# C1-only compilation and one core per service make every latency figure
+# unrepresentative. Load runs use docker-compose.benchmark.yml instead.
+#
+# Every number here is a starting hypothesis; the reasoning and the measured
+# results are in docs/operations/resource-limits.md (superproject).
+# =====================================================================
+
+# One flag set for all seven. Valid on both JDK 21 (six services) and JDK 17
+# (notification-service) — checked with -XX:+PrintFlagsFinal on each image.
+#
+#   -XX:+UseSerialGC               no concurrent GC threads or G1 bookkeeping;
+#                                  the right collector for heaps this small
+#   -XX:MaxRAMPercentage=45        max heap = 45% of mem_limit. The default is
+#                                  25%, which would leave a 576m container with
+#                                  a 144 MB heap. The other 55% is for
+#                                  metaspace, code cache, thread stacks, direct
+#                                  buffers and the JVM itself
+#   -Xss512k                       halves the per-thread stack reservation
+#   -XX:ReservedCodeCacheSize=64m  down from 240 MB; ample for C1-only code
+#   -XX:TieredStopAtLevel=1        C1 only: less compiler memory and a cheaper
+#                                  start, at the cost of peak throughput
+x-jvm-dev: &jvm-dev >-
+  -XX:+UseSerialGC
+  -XX:MaxRAMPercentage=45
+  -Xss512k
+  -XX:ReservedCodeCacheSize=64m
+  -XX:TieredStopAtLevel=1
+
+# memswap_limit equals mem_limit on purpose: the container gets no swap, so a
+# service that outgrows its ceiling is OOM-killed and visible, rather than
+# quietly paging inside the WSL2 VM.
+services:
+  config-server:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-dev
+    mem_limit: 320m
+    memswap_limit: 320m
+    cpus: 1.0
+
+  discovery-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-dev
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 1.0
+
+  api-gateway:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-dev
+    mem_limit: 448m
+    memswap_limit: 448m
+    cpus: 1.0
+
+  user-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-dev
+    mem_limit: 576m
+    memswap_limit: 576m
+    cpus: 1.0
+
+  product-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-dev
+    mem_limit: 576m
+    memswap_limit: 576m
+    cpus: 1.0
+
+  order-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-dev
+    mem_limit: 576m
+    memswap_limit: 576m
+    cpus: 1.0
+
+  notification-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-dev
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 1.0

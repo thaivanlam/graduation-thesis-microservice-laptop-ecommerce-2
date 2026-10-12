@@ -1,0 +1,92 @@
+# =====================================================================
+# Resource overlay — BENCHMARK (representative, bounded)
+#
+# Layered on top of docker-compose.yml for load runs; normally together with
+# the seed and observability profiles.
+#
+#   # from the repository root
+#   COMPOSE_PROFILES=prod,seed,observability \
+#     docker compose -f docker-compose.yml -f backend/docker-compose.benchmark.yml up -d
+#
+#   # from backend/
+#   COMPOSE_PROFILES=prod,seed,observability \
+#     docker compose -f docker-compose.yml -f docker-compose.benchmark.yml up -d
+#
+# The aim is the opposite of docker-compose.dev.yml: keep the JVM behaving as
+# it did in the recorded runs (docs/quality/performance-testing.md), while
+# putting a ceiling on each container so seven JVMs cannot between them ask
+# for more than the Docker VM has.
+#
+# Every number here is a starting hypothesis; the reasoning and the measured
+# results are in docs/operations/resource-limits.md (superproject).
+# =====================================================================
+
+# Full tiered compilation, default code cache, default thread stack: none of
+# the development flags that trade throughput for footprint.
+#
+#   -XX:MaxRAMPercentage=50   max heap = half of mem_limit; the default 25%
+#                             would give product-service a 256 MB heap
+#   -XX:+UseG1GC              NOT a tuning choice — it keeps the collector the
+#                             recorded runs used. Below 1792 MB of container
+#                             memory the JVM stops considering itself a
+#                             "server-class machine" and silently falls back to
+#                             SerialGC, so any of the limits below would change
+#                             the collector under the measurement.
+x-jvm-benchmark: &jvm-benchmark >-
+  -XX:MaxRAMPercentage=50
+  -XX:+UseG1GC
+
+# Memory ceilings sum to 4864 MiB. With roughly 1.8 GiB for mysql, keycloak,
+# rabbitmq, prometheus, grafana and the frontend, that stays inside a 7.6 GiB
+# Docker VM. CPU ceilings on the request path sit above the peaks recorded at
+# the 2 100 req/s knee (product ~4.3 cores, gateway ~2.4), so they bound a
+# runaway without becoming the bottleneck being measured.
+services:
+  config-server:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-benchmark
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 1.0
+
+  discovery-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-benchmark
+    mem_limit: 448m
+    memswap_limit: 448m
+    cpus: 1.0
+
+  api-gateway:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-benchmark
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 4.0
+
+  user-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-benchmark
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 2.0
+
+  product-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-benchmark
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    cpus: 6.0
+
+  order-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-benchmark
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    cpus: 4.0
+
+  notification-service:
+    environment:
+      JAVA_TOOL_OPTIONS: *jvm-benchmark
+    mem_limit: 448m
+    memswap_limit: 448m
+    cpus: 1.0
