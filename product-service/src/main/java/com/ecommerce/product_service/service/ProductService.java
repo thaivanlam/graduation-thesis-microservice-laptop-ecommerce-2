@@ -1,6 +1,7 @@
 package com.ecommerce.product_service.service;
 
 
+import com.ecommerce.product_service.payload.InventoryLine;
 import com.ecommerce.product_service.payload.ProductDTO;
 import com.ecommerce.product_service.payload.ProductResponse;
 import org.springframework.web.multipart.MultipartFile;
@@ -28,6 +29,10 @@ public interface ProductService {
     ProductDTO getProduct(Long productId);
 
     void reduceProductQuantity(Long productId, int quantity);
+
+    void reduceProductQuantities(List<InventoryLine> lines);
+
+    void restoreProductQuantities(List<InventoryLine> lines);
 
     ProductResponse getAllProductsForAdmin(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
 

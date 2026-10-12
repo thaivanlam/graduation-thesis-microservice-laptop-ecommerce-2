@@ -3,6 +3,7 @@ package com.ecommerce.product_service.controller;
 
 import com.ecommerce.product_service.config.AppConstants;
 import com.ecommerce.product_service.payload.AnalyticsProductResponse;
+import com.ecommerce.product_service.payload.InventoryBatchRequest;
 import com.ecommerce.product_service.payload.InventoryUpdateRequest;
 import com.ecommerce.product_service.payload.ProductDTO;
 import com.ecommerce.product_service.payload.ProductResponse;
@@ -125,6 +126,18 @@ public class ProductController {
     @PostMapping("/internal/products/{productId}/reduce-stock")
     public ResponseEntity<Void> reduceProductStock(@PathVariable Long productId, @RequestBody InventoryUpdateRequest request) {
         productService.reduceProductQuantity(productId, request.getQuantity());
+        return ResponseEntity.accepted().build();
+    }
+
+    @PostMapping("/internal/products/reduce-stock")
+    public ResponseEntity<Void> reduceProductStocks(@RequestBody InventoryBatchRequest request) {
+        productService.reduceProductQuantities(request.getItems());
+        return ResponseEntity.accepted().build();
+    }
+
+    @PostMapping("/internal/products/restore-stock")
+    public ResponseEntity<Void> restoreProductStocks(@RequestBody InventoryBatchRequest request) {
+        productService.restoreProductQuantities(request.getItems());
         return ResponseEntity.accepted().build();
     }
 

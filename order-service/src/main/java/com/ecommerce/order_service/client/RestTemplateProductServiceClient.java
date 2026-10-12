@@ -2,12 +2,15 @@ package com.ecommerce.order_service.client;
 
 import com.ecommerce.order_service.exceptions.ResourceNotFoundException;
 import com.ecommerce.order_service.clientpayload.ProductDTO;
+import com.ecommerce.order_service.clientpayload.StockLine;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
 
 @Component
 public class RestTemplateProductServiceClient implements ProductServiceClient{
@@ -31,19 +34,24 @@ public class RestTemplateProductServiceClient implements ProductServiceClient{
     }
 
     @Override
-    public void reduceProductQuantity(Long productId, int quantity) {
-        restTemplate.exchange(baseUrl + "/internal/products/" + productId + "/reduce-stock", HttpMethod.POST, new HttpEntity<>(new InventoryUpdateRequest(quantity)), Void.class);
+    public void reduceProductQuantities(List<StockLine> lines) {
+        restTemplate.exchange(baseUrl + "/internal/products/reduce-stock", HttpMethod.POST, new HttpEntity<>(new InventoryBatchRequest(lines)), Void.class);
     }
 
-    private static class InventoryUpdateRequest {
-        private final int quantity;
+    @Override
+    public void restoreProductQuantities(List<StockLine> lines) {
+        restTemplate.exchange(baseUrl + "/internal/products/restore-stock", HttpMethod.POST, new HttpEntity<>(new InventoryBatchRequest(lines)), Void.class);
+    }
 
-        private InventoryUpdateRequest(int quantity) {
-            this.quantity = quantity;
+    private static class InventoryBatchRequest {
+        private final List<StockLine> items;
+
+        private InventoryBatchRequest(List<StockLine> items) {
+            this.items = items;
         }
 
-        public int getQuantity() {
-            return quantity;
+        public List<StockLine> getItems() {
+            return items;
         }
     }
 }

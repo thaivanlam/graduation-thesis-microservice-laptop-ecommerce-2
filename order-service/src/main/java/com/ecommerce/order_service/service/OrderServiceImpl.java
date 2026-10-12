@@ -3,6 +3,7 @@ package com.ecommerce.order_service.service;
 
 import com.ecommerce.order_service.client.ProductServiceClient;
 import com.ecommerce.order_service.clientpayload.ProductDTO;
+import com.ecommerce.order_service.clientpayload.StockLine;
 import com.ecommerce.order_service.exceptions.APIException;
 import com.ecommerce.order_service.exceptions.ResourceNotFoundException;
 import com.ecommerce.order_service.model.*;
@@ -13,6 +14,8 @@ import com.ecommerce.order_service.repositories.OrderRepository;
 import com.ecommerce.order_service.util.AuthUtil;
 import jakarta.transaction.Transactional;
 import org.modelmapper.ModelMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -28,6 +31,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
+    private static final Logger log = LoggerFactory.getLogger(OrderServiceImpl.class);
+
     @Autowired
     private CartRepository cartRepository;
 
@@ -64,50 +69,73 @@ public class OrderServiceImpl implements OrderService {
             throw new APIException("Cart is empty");
         }
 
-        Order order = new Order();
-        order.setEmail(emailId);
-        order.setOrderDate(LocalDate.now());
-        order.setTotalAmount(cart.getTotalPrice());
-        order.setOrderStatus("Accepted");
-        order.setAddressId(addressId);
+        List<StockLine> stockLines = cart.getCartItems().stream()
+                .map(item -> new StockLine(item.getProductSnapshot().getProductId(), item.getQuantity()))
+                .toList();
 
-        Payment payment = new Payment(paymentMethod, pgPaymentId, pgStatus, pgResponseMessage, pgName);
-        payment.setOrder(order);
-        order.setPayment(payment);
+        // Stock lives in product-service, outside this transaction. It is taken for the whole
+        // cart in one call - all lines or none - before anything is written here, and given
+        // back if the rest of the checkout fails, so a rolled-back order never keeps stock.
+        productServiceClient.reduceProductQuantities(stockLines);
 
-        Order savedOrder = orderRepository.save(order);
+        try {
+            Order order = new Order();
+            order.setEmail(emailId);
+            order.setOrderDate(LocalDate.now());
+            order.setTotalAmount(cart.getTotalPrice());
+            order.setOrderStatus("Accepted");
+            order.setAddressId(addressId);
 
-        List<OrderItem> orderItems = new ArrayList<>();
+            Payment payment = new Payment(paymentMethod, pgPaymentId, pgStatus, pgResponseMessage, pgName);
+            payment.setOrder(order);
+            order.setPayment(payment);
 
-        for (CartItem cartItem : cart.getCartItems()) {
-            OrderItem orderItem = new OrderItem();
-            orderItem.setProductSnapshot(cartItem.getProductSnapshot());
-            orderItem.setQuantity(cartItem.getQuantity());
-            orderItem.setDiscount(cartItem.getDiscount());
-            orderItem.setOrderedProductPrice(cartItem.getProductPrice());
-            orderItem.setOrder(savedOrder);
-            orderItems.add(orderItem);
+            Order savedOrder = orderRepository.save(order);
+
+            List<OrderItem> orderItems = new ArrayList<>();
+
+            for (CartItem cartItem : cart.getCartItems()) {
+                OrderItem orderItem = new OrderItem();
+                orderItem.setProductSnapshot(cartItem.getProductSnapshot());
+                orderItem.setQuantity(cartItem.getQuantity());
+                orderItem.setDiscount(cartItem.getDiscount());
+                orderItem.setOrderedProductPrice(cartItem.getProductPrice());
+                orderItem.setOrder(savedOrder);
+                orderItems.add(orderItem);
+            }
+
+            orderItems = orderItemRepository.saveAll(orderItems);
+
+            cart.getCartItems().forEach(item ->
+                    cartService.deleteProductFromCart(cart.getCartId(), item.getProductSnapshot().getProductId()));
+
+            // Surface constraint failures here, while the stock can still be given back.
+            orderRepository.flush();
+
+            OrderDTO orderDTO = modelMapper.map(savedOrder, OrderDTO.class);
+            orderDTO.setOrderItems(orderItems.stream().filter(Objects::nonNull).map(this::mapToOrderItemDTO).collect(Collectors.toList()));
+            orderDTO.setAddressId(addressId);
+
+            String subject = "Order Confirmation - Order " + savedOrder.getOrderId();
+            String body = "Thank you for your purchase! Your order " + savedOrder.getOrderId()
+                    + " has been placed successfully with total amount " + savedOrder.getTotalAmount() + ".";
+            notificationPublisher.sendEmailNotification(new EmailDetails(emailId, body, subject));
+
+            return orderDTO;
+        } catch (RuntimeException e) {
+            restoreStock(stockLines, e);
+            throw e;
         }
+    }
 
-        orderItems = orderItemRepository.saveAll(orderItems);
-
-        cart.getCartItems().forEach(item -> {
-            int quantity = item.getQuantity();
-            productServiceClient.reduceProductQuantity(item.getProductSnapshot().getProductId(), quantity);
-            cartService.deleteProductFromCart(cart.getCartId(), item.getProductSnapshot().getProductId());
-        });
-
-
-        OrderDTO orderDTO = modelMapper.map(savedOrder, OrderDTO.class);
-        orderDTO.setOrderItems(orderItems.stream().filter(Objects::nonNull).map(this::mapToOrderItemDTO).collect(Collectors.toList()));
-        orderDTO.setAddressId(addressId);
-
-        String subject = "Order Confirmation - Order " + savedOrder.getOrderId();
-        String body = "Thank you for your purchase! Your order " + savedOrder.getOrderId()
-                + " has been placed successfully with total amount " + savedOrder.getTotalAmount() + ".";
-        notificationPublisher.sendEmailNotification(new EmailDetails(emailId, body, subject));
-
-        return orderDTO;
+    private void restoreStock(List<StockLine> stockLines, RuntimeException cause) {
+        try {
+            productServiceClient.restoreProductQuantities(stockLines);
+        } catch (RuntimeException restoreFailure) {
+            // Nothing else will put these units back; the log line is the reconciliation record.
+            log.error("Checkout failed and its stock could not be restored; restore by hand: {}", stockLines, restoreFailure);
+            cause.addSuppressed(restoreFailure);
+        }
     }
 
     @Override

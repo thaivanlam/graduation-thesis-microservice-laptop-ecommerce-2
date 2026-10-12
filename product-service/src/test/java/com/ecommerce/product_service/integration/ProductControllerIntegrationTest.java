@@ -3,6 +3,7 @@ package com.ecommerce.product_service.integration;
 import com.ecommerce.product_service.controller.ProductController;
 import com.ecommerce.product_service.exceptions.APIException;
 import com.ecommerce.product_service.exceptions.ResourceNotFoundException;
+import com.ecommerce.product_service.payload.InventoryLine;
 import com.ecommerce.product_service.payload.ProductDTO;
 import com.ecommerce.product_service.payload.ProductResponse;
 import com.ecommerce.product_service.service.AnalyticsService;
@@ -224,5 +225,41 @@ class ProductControllerIntegrationTest {
                         .content("{\"quantity\":9999}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Insufficient product quantity"));
+    }
+
+    @Test
+    @DisplayName("POST /api/internal/products/reduce-stock answers 202 and forwards every line of the order")
+    void acceptsBatchStockReduction() throws Exception {
+        mockMvc.perform(post("/api/internal/products/reduce-stock")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":7,\"quantity\":2},{\"productId\":8,\"quantity\":1}]}"))
+                .andExpect(status().isAccepted());
+
+        verify(productService).reduceProductQuantities(List.of(new InventoryLine(7L, 2), new InventoryLine(8L, 1)));
+    }
+
+    @Test
+    @DisplayName("a batch with a line beyond the quantity on hand is refused with 400")
+    void refusesBatchOversellOverHttp() throws Exception {
+        doThrow(new APIException("Insufficient product quantity for productId: 8"))
+                .when(productService).reduceProductQuantities(any());
+
+        mockMvc.perform(post("/api/internal/products/reduce-stock")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":7,\"quantity\":2},{\"productId\":8,\"quantity\":9999}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Insufficient product quantity for productId: 8"))
+                .andExpect(jsonPath("$.status").value(false));
+    }
+
+    @Test
+    @DisplayName("POST /api/internal/products/restore-stock answers 202 and forwards the lines to give back")
+    void acceptsStockRestore() throws Exception {
+        mockMvc.perform(post("/api/internal/products/restore-stock")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":7,\"quantity\":2}]}"))
+                .andExpect(status().isAccepted());
+
+        verify(productService).restoreProductQuantities(List.of(new InventoryLine(7L, 2)));
     }
 }

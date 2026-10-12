@@ -1,6 +1,7 @@
 package com.ecommerce.order_service.unit;
 
 import com.ecommerce.order_service.client.ProductServiceClient;
+import com.ecommerce.order_service.clientpayload.StockLine;
 import com.ecommerce.order_service.exceptions.APIException;
 import com.ecommerce.order_service.exceptions.ResourceNotFoundException;
 import com.ecommerce.order_service.model.Cart;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -38,10 +40,12 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,6 +60,8 @@ import static org.mockito.Mockito.when;
 class OrderServiceImplTest {
 
     private static final String BUYER = "buyer@techzone.test";
+
+    private static final List<StockLine> TWO_LINES = List.of(new StockLine(7L, 2), new StockLine(8L, 1));
 
     @Mock
     private CartRepository cartRepository;
@@ -177,7 +183,7 @@ class OrderServiceImplTest {
         }
 
         @Test
-        @DisplayName("takes the stock for every line from the catalogue service")
+        @DisplayName("takes the stock for every line from the catalogue service in a single call")
         void reducesStockForEveryLine() {
             when(cartRepository.findCartByEmail(BUYER)).thenReturn(cartWith(
                     line(7L, "MSI Katana 15", 900.0, 2),
@@ -186,8 +192,8 @@ class OrderServiceImplTest {
 
             orderService.placeOrder(BUYER, 11L, "card", "Stripe", "pi_123", "succeeded", "ok");
 
-            verify(productServiceClient).reduceProductQuantity(7L, 2);
-            verify(productServiceClient).reduceProductQuantity(8L, 1);
+            verify(productServiceClient).reduceProductQuantities(TWO_LINES);
+            verify(productServiceClient, never()).restoreProductQuantities(anyList());
         }
 
         @Test
@@ -229,7 +235,7 @@ class OrderServiceImplTest {
                     .hasMessage("Cart is empty");
 
             verify(orderRepository, never()).save(any(Order.class));
-            verify(productServiceClient, never()).reduceProductQuantity(anyLong(), anyInt());
+            verify(productServiceClient, never()).reduceProductQuantities(anyList());
         }
 
         @Test
@@ -243,25 +249,85 @@ class OrderServiceImplTest {
         }
 
         @Test
-        @DisplayName("BUG-01 characterisation: a line that fails halfway leaves the earlier lines' stock taken")
-        void partialFailureLeavesStockTaken() {
-            // Stock is decremented through a remote HTTP call inside the local transaction.
-            // When the second call fails, the database work rolls back but the first
-            // decrement has already been committed in product-service - the classic
-            // dual-write problem, documented as BUG-01 in docs/backend/known-defects.md.
+        @DisplayName("BUG-01 regression: a refused stock reservation writes nothing and leaves nothing to undo")
+        void refusedReservationWritesNothing() {
+            // The whole cart is reserved in one call that product-service applies atomically,
+            // so a short line means no line was taken. Until 2026-10-12 this test pinned the
+            // defect: one call per line, and the lines before the failing one stayed taken.
             when(cartRepository.findCartByEmail(BUYER)).thenReturn(cartWith(
                     line(7L, "MSI Katana 15", 900.0, 2),
                     line(8L, "Dell XPS 13", 1500.0, 1)));
             stubHappyPathPersistence();
             doThrow(new APIException("Insufficient product quantity"))
-                    .when(productServiceClient).reduceProductQuantity(8L, 1);
+                    .when(productServiceClient).reduceProductQuantities(anyList());
 
             assertThatThrownBy(() -> orderService.placeOrder(BUYER, 11L, "card", "Stripe", "pi", "ok", "ok"))
                     .isInstanceOf(APIException.class);
 
-            // The first line was already taken and nothing puts it back.
-            verify(productServiceClient).reduceProductQuantity(7L, 2);
+            verify(productServiceClient, times(1)).reduceProductQuantities(TWO_LINES);
+            verify(productServiceClient, never()).restoreProductQuantities(anyList());
+            verify(orderRepository, never()).save(any(Order.class));
+            verify(cartService, never()).deleteProductFromCart(anyLong(), anyLong());
             verify(notificationPublisher, never()).sendEmailNotification(any(EmailDetails.class));
+        }
+
+        @Test
+        @DisplayName("BUG-01 regression: stock is taken before the order is written")
+        void reservesStockBeforeWritingTheOrder() {
+            when(cartRepository.findCartByEmail(BUYER)).thenReturn(cartWith(line(7L, "MSI Katana 15", 900.0, 2)));
+            stubHappyPathPersistence();
+
+            orderService.placeOrder(BUYER, 11L, "card", "Stripe", "pi_123", "succeeded", "ok");
+
+            InOrder inOrder = inOrder(productServiceClient, orderRepository);
+            inOrder.verify(productServiceClient).reduceProductQuantities(anyList());
+            inOrder.verify(orderRepository).save(any(Order.class));
+        }
+
+        @Test
+        @DisplayName("BUG-01 regression: a checkout that fails after the stock was taken gives every line back")
+        void failureAfterReservationRestoresStock() {
+            when(cartRepository.findCartByEmail(BUYER)).thenReturn(cartWith(
+                    line(7L, "MSI Katana 15", 900.0, 2),
+                    line(8L, "Dell XPS 13", 1500.0, 1)));
+            stubHappyPathPersistence();
+            doThrow(new IllegalStateException("database is down")).when(orderItemRepository).saveAll(any());
+
+            assertThatThrownBy(() -> orderService.placeOrder(BUYER, 11L, "card", "Stripe", "pi", "ok", "ok"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("database is down");
+
+            verify(productServiceClient).restoreProductQuantities(TWO_LINES);
+        }
+
+        @Test
+        @DisplayName("BUG-11: a broker outage on the confirmation email gives the stock back")
+        void failedNotificationRestoresStock() {
+            when(cartRepository.findCartByEmail(BUYER)).thenReturn(cartWith(
+                    line(7L, "MSI Katana 15", 900.0, 2),
+                    line(8L, "Dell XPS 13", 1500.0, 1)));
+            stubHappyPathPersistence();
+            doThrow(new IllegalStateException("broker unreachable"))
+                    .when(notificationPublisher).sendEmailNotification(any(EmailDetails.class));
+
+            assertThatThrownBy(() -> orderService.placeOrder(BUYER, 11L, "card", "Stripe", "pi", "ok", "ok"))
+                    .isInstanceOf(IllegalStateException.class);
+
+            verify(productServiceClient).restoreProductQuantities(TWO_LINES);
+        }
+
+        @Test
+        @DisplayName("a failed restore does not hide the error that caused it")
+        void failedRestoreKeepsTheOriginalError() {
+            when(cartRepository.findCartByEmail(BUYER)).thenReturn(cartWith(line(7L, "MSI Katana 15", 900.0, 2)));
+            stubHappyPathPersistence();
+            doThrow(new IllegalStateException("database is down")).when(orderItemRepository).saveAll(any());
+            RuntimeException restoreFailure = new IllegalStateException("catalogue unreachable");
+            doThrow(restoreFailure).when(productServiceClient).restoreProductQuantities(anyList());
+
+            assertThatThrownBy(() -> orderService.placeOrder(BUYER, 11L, "card", "Stripe", "pi", "ok", "ok"))
+                    .hasMessage("database is down")
+                    .hasSuppressedException(restoreFailure);
         }
     }
 

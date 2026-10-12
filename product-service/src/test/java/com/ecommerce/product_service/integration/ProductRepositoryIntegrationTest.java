@@ -186,4 +186,68 @@ class ProductRepositoryIntegrationTest {
 
         assertThat(productRepository.count()).isEqualTo(before - 2);
     }
+
+    private Product katana() {
+        return productRepository.findAll().stream()
+                .filter(p -> p.getProductName().equals("MSI Katana 15"))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    @Test
+    @DisplayName("reduceStock decrements the stock on hand and reports one row changed")
+    void reduceStockDecrements() {
+        Long id = katana().getProductId();
+
+        assertThat(productRepository.reduceStock(id, 3)).isEqualTo(1);
+
+        assertThat(productRepository.findById(id).orElseThrow().getQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("reduceStock allows the order that takes the last unit")
+    void reduceStockAllowsExactStock() {
+        Long id = katana().getProductId();
+
+        assertThat(productRepository.reduceStock(id, 5)).isEqualTo(1);
+
+        assertThat(productRepository.findById(id).orElseThrow().getQuantity()).isZero();
+    }
+
+    @Test
+    @DisplayName("reduceStock changes nothing when the stock is short (BUG-01: the check and the write are one statement)")
+    void reduceStockRefusesOversell() {
+        Long id = katana().getProductId();
+
+        assertThat(productRepository.reduceStock(id, 6)).isZero();
+
+        assertThat(productRepository.findById(id).orElseThrow().getQuantity()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("reduceStock changes nothing for a product with no stock figure, instead of failing")
+    void reduceStockTreatsNullStockAsShort() {
+        Product product = katana();
+        product.setQuantity(null);
+        productRepository.saveAndFlush(product);
+
+        assertThat(productRepository.reduceStock(product.getProductId(), 1)).isZero();
+    }
+
+    @Test
+    @DisplayName("reduceStock reports no row for a product that does not exist")
+    void reduceStockIgnoresUnknownProduct() {
+        assertThat(productRepository.reduceStock(999_999L, 1)).isZero();
+    }
+
+    @Test
+    @DisplayName("restoreStock gives back exactly what reduceStock took")
+    void restoreStockUndoesReduceStock() {
+        Long id = katana().getProductId();
+        productRepository.reduceStock(id, 4);
+
+        assertThat(productRepository.restoreStock(id, 4)).isEqualTo(1);
+
+        assertThat(productRepository.findById(id).orElseThrow().getQuantity()).isEqualTo(5);
+    }
 }

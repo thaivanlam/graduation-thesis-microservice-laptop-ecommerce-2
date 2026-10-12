@@ -2,6 +2,7 @@ package com.ecommerce.order_service.integration;
 
 import com.ecommerce.order_service.client.RestTemplateProductServiceClient;
 import com.ecommerce.order_service.clientpayload.ProductDTO;
+import com.ecommerce.order_service.clientpayload.StockLine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,8 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -97,28 +100,57 @@ class ProductServiceClientIntegrationTest {
     }
 
     @Test
-    @DisplayName("reduceProductQuantity posts the quantity to the stock endpoint")
+    @DisplayName("reduceProductQuantities posts every line of the order to the batch stock endpoint in one request")
     void reducesStock() {
-        server.expect(requestTo(BASE_URL + "/internal/products/7/reduce-stock"))
+        server.expect(requestTo(BASE_URL + "/internal/products/reduce-stock"))
                 .andExpect(method(HttpMethod.POST))
-                .andExpect(jsonPath("$.quantity").value(3))
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].productId").value(7))
+                .andExpect(jsonPath("$.items[0].quantity").value(3))
+                .andExpect(jsonPath("$.items[1].productId").value(8))
+                .andExpect(jsonPath("$.items[1].quantity").value(1))
                 .andRespond(withStatus(org.springframework.http.HttpStatus.ACCEPTED));
 
-        client.reduceProductQuantity(7L, 3);
+        client.reduceProductQuantities(List.of(new StockLine(7L, 3), new StockLine(8L, 1)));
 
         server.verify();
     }
 
     @Test
-    @DisplayName("reduceProductQuantity sends a JSON body, not form data")
+    @DisplayName("reduceProductQuantities sends a JSON body, not form data")
     void sendsJsonBody() {
-        server.expect(requestTo(BASE_URL + "/internal/products/7/reduce-stock"))
+        server.expect(requestTo(BASE_URL + "/internal/products/reduce-stock"))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andRespond(withStatus(org.springframework.http.HttpStatus.ACCEPTED));
 
-        client.reduceProductQuantity(7L, 1);
+        client.reduceProductQuantities(List.of(new StockLine(7L, 1)));
 
         server.verify();
+    }
+
+    @Test
+    @DisplayName("restoreProductQuantities posts the same lines to the compensating endpoint")
+    void restoresStock() {
+        server.expect(requestTo(BASE_URL + "/internal/products/restore-stock"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].productId").value(7))
+                .andExpect(jsonPath("$.items[0].quantity").value(3))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.ACCEPTED));
+
+        client.restoreProductQuantities(List.of(new StockLine(7L, 3)));
+
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("a reservation the catalogue refuses propagates, so checkout stops before writing an order")
+    void refusedReservationPropagates() {
+        server.expect(requestTo(BASE_URL + "/internal/products/reduce-stock"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_REQUEST));
+
+        assertThatThrownBy(() -> client.reduceProductQuantities(List.of(new StockLine(7L, 9999))))
+                .isInstanceOf(HttpClientErrorException.BadRequest.class);
     }
 
     @Test

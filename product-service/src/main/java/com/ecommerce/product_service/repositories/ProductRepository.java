@@ -7,7 +7,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -26,4 +28,14 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
 
     @Query("SELECT DISTINCT p.brand FROM Product p WHERE p.brand IS NOT NULL AND p.brand != '' ORDER BY p.brand")
     List<String> findAllDistinctBrands();
+
+    // Check and decrement in one statement; 0 rows means unknown product or too little stock.
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Product p SET p.quantity = p.quantity - :quantity "
+            + "WHERE p.productId = :productId AND p.quantity >= :quantity")
+    int reduceStock(@Param("productId") Long productId, @Param("quantity") int quantity);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Product p SET p.quantity = COALESCE(p.quantity, 0) + :quantity WHERE p.productId = :productId")
+    int restoreStock(@Param("productId") Long productId, @Param("quantity") int quantity);
 }

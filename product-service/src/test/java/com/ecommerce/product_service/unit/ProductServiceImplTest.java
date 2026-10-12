@@ -4,6 +4,7 @@ import com.ecommerce.product_service.exceptions.APIException;
 import com.ecommerce.product_service.exceptions.ResourceNotFoundException;
 import com.ecommerce.product_service.model.Category;
 import com.ecommerce.product_service.model.Product;
+import com.ecommerce.product_service.payload.InventoryLine;
 import com.ecommerce.product_service.payload.ProductDTO;
 import com.ecommerce.product_service.repositories.CategoryRepository;
 import com.ecommerce.product_service.repositories.ProductRepository;
@@ -28,6 +29,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +38,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -332,6 +335,110 @@ class ProductServiceImplTest {
 
             assertThatThrownBy(() -> productService.reduceProductQuantity(404L, 1))
                     .isInstanceOf(ResourceNotFoundException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("reduceProductQuantities - the whole order's stock in one transaction (BUG-01)")
+    class ReduceProductQuantities {
+
+        @Test
+        @DisplayName("takes every line through the atomic check-and-decrement")
+        void takesEveryLine() {
+            when(productRepository.reduceStock(7L, 2)).thenReturn(1);
+            when(productRepository.reduceStock(8L, 1)).thenReturn(1);
+
+            productService.reduceProductQuantities(List.of(new InventoryLine(7L, 2), new InventoryLine(8L, 1)));
+
+            verify(productRepository).reduceStock(7L, 2);
+            verify(productRepository).reduceStock(8L, 1);
+        }
+
+        @Test
+        @DisplayName("BUG-01 regression: a short line fails the whole batch, so the transaction rolls the earlier lines back")
+        void shortLineFailsTheBatch() {
+            when(productRepository.reduceStock(7L, 2)).thenReturn(1);
+            when(productRepository.reduceStock(8L, 5)).thenReturn(0);
+            when(productRepository.existsById(8L)).thenReturn(true);
+
+            assertThatThrownBy(() -> productService.reduceProductQuantities(
+                    List.of(new InventoryLine(7L, 2), new InventoryLine(8L, 5), new InventoryLine(9L, 1))))
+                    .isInstanceOf(APIException.class)
+                    .hasMessage("Insufficient product quantity for productId: 8");
+
+            verify(productRepository, never()).reduceStock(9L, 1);
+        }
+
+        @Test
+        @DisplayName("the batch method is transactional, which is what makes a partial failure undo itself")
+        void isTransactional() throws NoSuchMethodException {
+            assertThat(ProductServiceImpl.class.getMethod("reduceProductQuantities", List.class)
+                    .isAnnotationPresent(Transactional.class)).isTrue();
+        }
+
+        @Test
+        @DisplayName("fails with not-found when a line names a product that does not exist")
+        void failsForUnknownProduct() {
+            when(productRepository.reduceStock(404L, 1)).thenReturn(0);
+            when(productRepository.existsById(404L)).thenReturn(false);
+
+            assertThatThrownBy(() -> productService.reduceProductQuantities(List.of(new InventoryLine(404L, 1))))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("refuses a zero or negative quantity before touching any stock")
+        void refusesNonPositiveQuantity() {
+            assertThatThrownBy(() -> productService.reduceProductQuantities(
+                    List.of(new InventoryLine(7L, 2), new InventoryLine(8L, -5))))
+                    .isInstanceOf(APIException.class)
+                    .hasMessage("Quantity must be positive");
+
+            verify(productRepository, never()).reduceStock(any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("refuses an empty batch")
+        void refusesEmptyBatch() {
+            assertThatThrownBy(() -> productService.reduceProductQuantities(List.of()))
+                    .isInstanceOf(APIException.class);
+            assertThatThrownBy(() -> productService.reduceProductQuantities(null))
+                    .isInstanceOf(APIException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("restoreProductQuantities - the compensation for a checkout that failed")
+    class RestoreProductQuantities {
+
+        @Test
+        @DisplayName("gives every line back")
+        void restoresEveryLine() {
+            productService.restoreProductQuantities(List.of(new InventoryLine(7L, 2), new InventoryLine(8L, 1)));
+
+            verify(productRepository).restoreStock(7L, 2);
+            verify(productRepository).restoreStock(8L, 1);
+        }
+
+        @Test
+        @DisplayName("skips a product that has been deleted since, and still restores the rest")
+        void skipsDeletedProduct() {
+            when(productRepository.restoreStock(7L, 2)).thenReturn(0);
+            when(productRepository.restoreStock(8L, 1)).thenReturn(1);
+
+            productService.restoreProductQuantities(List.of(new InventoryLine(7L, 2), new InventoryLine(8L, 1)));
+
+            verify(productRepository).restoreStock(8L, 1);
+        }
+
+        @Test
+        @DisplayName("refuses a negative quantity, which would silently take stock")
+        void refusesNegativeQuantity() {
+            assertThatThrownBy(() -> productService.restoreProductQuantities(List.of(new InventoryLine(7L, -2))))
+                    .isInstanceOf(APIException.class)
+                    .hasMessage("Quantity must be positive");
+
+            verify(productRepository, never()).restoreStock(any(), anyInt());
         }
     }
 

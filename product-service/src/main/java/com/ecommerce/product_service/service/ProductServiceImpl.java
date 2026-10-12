@@ -5,6 +5,7 @@ import com.ecommerce.product_service.exceptions.APIException;
 import com.ecommerce.product_service.exceptions.ResourceNotFoundException;
 import com.ecommerce.product_service.model.Category;
 import com.ecommerce.product_service.model.Product;
+import com.ecommerce.product_service.payload.InventoryLine;
 import com.ecommerce.product_service.payload.ProductDTO;
 import com.ecommerce.product_service.payload.ProductResponse;
 import com.ecommerce.product_service.repositories.CategoryRepository;
@@ -20,6 +21,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -350,6 +352,46 @@ public class ProductServiceImpl implements ProductService {
         }
         product.setQuantity(product.getQuantity() - quantity);
         productRepository.save(product);
+    }
+
+    @Override
+    @Transactional
+    public void reduceProductQuantities(List<InventoryLine> lines) {
+        validateInventoryLines(lines);
+        // One local transaction for the whole order: a line that cannot be taken throws,
+        // and the rollback puts back every line already decremented before it.
+        for (InventoryLine line : lines) {
+            if (productRepository.reduceStock(line.getProductId(), line.getQuantity()) == 0) {
+                if (!productRepository.existsById(line.getProductId())) {
+                    throw new ResourceNotFoundException("Product", "productId", line.getProductId());
+                }
+                throw new APIException("Insufficient product quantity for productId: " + line.getProductId());
+            }
+        }
+    }
+
+    @Override
+    @Transactional
+    public void restoreProductQuantities(List<InventoryLine> lines) {
+        validateInventoryLines(lines);
+        // A product deleted since the stock was taken has nothing to give back to; skip it.
+        for (InventoryLine line : lines) {
+            productRepository.restoreStock(line.getProductId(), line.getQuantity());
+        }
+    }
+
+    private void validateInventoryLines(List<InventoryLine> lines) {
+        if (lines == null || lines.isEmpty()) {
+            throw new APIException("At least one stock line is required");
+        }
+        for (InventoryLine line : lines) {
+            if (line.getProductId() == null) {
+                throw new APIException("Product id is required");
+            }
+            if (line.getQuantity() <= 0) {
+                throw new APIException("Quantity must be positive");
+            }
+        }
     }
 
     @Override
